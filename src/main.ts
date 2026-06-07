@@ -10,6 +10,7 @@ import {
   pause,
   play,
   renderIdeasRegistry,
+  renderPlanRegistry,
   setTickMs,
   step,
   toggleIdea,
@@ -67,6 +68,13 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
       <span>Idea Registry</span><span id="ideas-arrow">▸</span>
     </div>
     <div id="ideas-panel"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title clickable" id="plans-toggle">
+      <span>Plan Registry</span><span id="plans-arrow">▸</span>
+    </div>
+    <div id="plans-panel"></div>
   </div>
 
   <div class="panel">
@@ -176,6 +184,18 @@ window.addEventListener('DOMContentLoaded', () => {
     p.style.display = open ? 'block' : 'none'
     a.textContent = open ? '▾' : '▸'
     if (open) renderIdeasRegistry()
+  })
+
+  const plansToggle = document.getElementById('plans-toggle')
+  if (!plansToggle) throw new Error('Missing #plans-toggle')
+  plansToggle.addEventListener('click', () => {
+    const p = document.getElementById('plans-panel')
+    const a = document.getElementById('plans-arrow')
+    if (!p || !a) return
+    const open = p.style.display === 'none'
+    p.style.display = open ? 'block' : 'none'
+    a.textContent = open ? '▾' : '▸'
+    if (open) renderPlanRegistry()
   })
 
   const modalClose = document.getElementById('modal-close')

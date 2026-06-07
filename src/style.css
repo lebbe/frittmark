@@ -238,6 +238,11 @@ input[type='range']::-webkit-slider-thumb {
   margin-top: 4px;
 }
 
+#plans-panel {
+  display: none;
+  margin-top: 4px;
+}
+
 .idea-reg-row {
   display: flex;
   align-items: center;
@@ -304,6 +309,34 @@ input[type='range']::-webkit-slider-thumb {
 .ireg-teach:hover {
   background: #1e361e;
   color: #6ab06a;
+}
+
+.plan-reg-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 0;
+  border-bottom: 1px solid #1e1e1e;
+  font-size: 9px;
+}
+
+.plan-reg-row:last-child {
+  border-bottom: none;
+}
+
+.preg-name {
+  flex: 1;
+  color: #666;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.preg-count {
+  color: #888;
+  width: 28px;
+  text-align: right;
+  flex-shrink: 0;
 }
 
 #canvas-wrap {

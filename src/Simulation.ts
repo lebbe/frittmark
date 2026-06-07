@@ -23,6 +23,23 @@ export class Simulation {
   step() {
     this.tickN++
     const w = this.world
+    const getCompletedHomeFood = (a: (typeof w.agents)[number]) => {
+      if (!a.homeCell) return { sugar: 0, cooked: 0 }
+      const c = w.cell(a.homeCell.x, a.homeCell.y)
+      if (!c.building || !c.building.complete || !c.building.inv) {
+        return { sugar: 0, cooked: 0 }
+      }
+      return {
+        sugar: c.building.inv.sugar,
+        cooked: c.building.inv.cooked,
+      }
+    }
+    const hasReproFood = (a: (typeof w.agents)[number]) => {
+      const homeFood = getCompletedHomeFood(a)
+      const carriedEquivalent = a.inventory.sugar + a.inventory.cooked * 2
+      const homeEquivalent = homeFood.sugar + homeFood.cooked * 2
+      return carriedEquivalent + homeEquivalent >= CFG.REPRO_MIN_SUGAR
+    }
     const nearCompletedShelter = (a: (typeof w.agents)[number]) => {
       for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
@@ -30,7 +47,11 @@ export class Simulation {
           const y = a.y + dy
           if (!w.inBounds(x, y)) continue
           const c = w.cell(x, y)
-          if (c.building && c.building.complete && c.building.type === 'shelter') {
+          if (
+            c.building &&
+            c.building.complete &&
+            c.building.type === 'shelter'
+          ) {
             return true
           }
         }
@@ -74,7 +95,7 @@ export class Simulation {
         (a) =>
           a.phase === 'adult' &&
           a.reproCooldown === 0 &&
-          a.inventory.sugar >= CFG.REPRO_MIN_SUGAR &&
+          hasReproFood(a) &&
           nearCompletedShelter(a),
       )
       for (const a of eligible) {
@@ -86,8 +107,8 @@ export class Simulation {
               b !== a &&
               b.phase === 'adult' &&
               b.reproCooldown === 0 &&
-              b.inventory.sugar >= CFG.REPRO_MIN_SUGAR &&
-                nearCompletedShelter(b),
+              hasReproFood(b) &&
+              nearCompletedShelter(b),
           )
         if (p) {
           w.spawn(a, p)

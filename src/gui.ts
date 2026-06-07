@@ -1,6 +1,7 @@
 import type { Agent } from './Agent'
 import { CFG } from './config'
 import { ALL_IDEA_KEYS, IDEAS, hasPrereqs, type IdeaId } from './ideas'
+import { PLAN_REGISTRY, type PlanName } from './planning'
 import type { Renderer } from './Renderer'
 import type { Simulation } from './Simulation'
 import { grantIdea, totalWealth } from './utils'
@@ -111,6 +112,8 @@ export function updateUI(): void {
 
   const panel = mustEl('ideas-panel')
   if (panel.style.display !== 'none') renderIdeasRegistry()
+  const plansPanel = mustEl('plans-panel')
+  if (plansPanel.style.display !== 'none') renderPlanRegistry()
 }
 
 export function renderIdeasRegistry(): void {
@@ -147,6 +150,28 @@ export function renderIdeasRegistry(): void {
       if (modalAgent) renderModal()
     })
   })
+}
+
+export function renderPlanRegistry(): void {
+  const { sim } = ensureState()
+  const agents = sim.world.agents
+  const panel = mustEl('plans-panel')
+  panel.innerHTML = ''
+
+  for (const planName of PLAN_REGISTRY) {
+    const count = agents.filter((a) => a.plan?.name === planName).length
+    const row = document.createElement('div')
+    row.className = 'plan-reg-row'
+    row.innerHTML = `
+      <span class="preg-name" title="${planName}">${formatPlanName(planName)}</span>
+      <span class="preg-count">${count}</span>
+    `
+    panel.appendChild(row)
+  }
+}
+
+function formatPlanName(name: PlanName): string {
+  return name.replace(/_/g, ' ').toLowerCase()
 }
 
 export function openModal(agent: Agent): void {
@@ -312,15 +337,17 @@ function renderHouseModal(): void {
       })
       .join('')
 
-    residentsHost.querySelectorAll<HTMLButtonElement>('.resident-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const idText = btn.dataset.agentId
-        if (!idText) return
-        const resident = sim.world.agents.find((a) => a.id === Number(idText))
-        if (!resident) return
-        openModal(resident)
+    residentsHost
+      .querySelectorAll<HTMLButtonElement>('.resident-btn')
+      .forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const idText = btn.dataset.agentId
+          if (!idText) return
+          const resident = sim.world.agents.find((a) => a.id === Number(idText))
+          if (!resident) return
+          openModal(resident)
+        })
       })
-    })
   }
 
   renderer.draw()

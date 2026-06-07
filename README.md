@@ -39,17 +39,18 @@ Frittmark retains Sugarscape's founding insight — that macro-level patterns em
 
 ## Architecture
 
-The code is organised into eight sections, written bottom-up so that no section depends on code below it. All sections live inside a single `<script>` tag.
+The code is organised into modular TypeScript files in `src/`.
 
 ```
 1. CONFIG      — all tuning parameters in one object (CFG)
 2. UTILS       — pure helper functions
 3. WORLD       — grid, cells, resource generation and regeneration
 4. IDEAS       — the strategy registry; each idea is fully self-contained
-5. AGENT       — agent class: values, needs, morals, memory, decision loop
-6. SIMULATION  — tick engine, birth and death management
-7. RENDERER    — canvas drawing
-8. GUI         — controls, statistics panel, agent inspector modal
+5. PLANNING    — plan types + plan builders (navigation, stockpiling, rest)
+6. AGENT       — agent class: values, needs, morals, memory, plan execution
+7. SIMULATION  — tick engine, birth and death management
+8. RENDERER    — canvas drawing
+9. GUI         — controls, statistics panel, agent inspector modal
 ```
 
 ---
@@ -60,63 +61,68 @@ All magic numbers live in a single `CFG` object so they can be found and changed
 
 ### Full Configuration Reference
 
-| Key                  | Default | Description                                                |
-| -------------------- | ------- | ---------------------------------------------------------- |
-| `GRID_W`             | `100`   | Grid width in cells                                        |
-| `GRID_H`             | `100`   | Grid height in cells                                       |
-| `CELL_PX`            | `7`     | Pixels per cell                                            |
-| `SUGAR_MAX`          | `10`    | Maximum sugar capacity per cell                            |
-| `WOOD_MAX`           | `8`     | Maximum wood capacity per cell                             |
-| `METAL_MAX`          | `5`     | Maximum metal capacity per cell                            |
-| `SUGAR_REGEN`        | `0.25`  | Sugar regenerated per tick per cell                        |
-| `WOOD_REGEN`         | `0.08`  | Wood regenerated per tick per cell                         |
-| `METAL_REGEN`        | `0.025` | Metal regenerated per tick per cell                        |
-| `INITIAL_AGENTS`     | `80`    | Agents spawned at simulation start                         |
-| `POP_CAP`            | `4000`  | Soft population ceiling; no reproduction above this        |
-| `HUNGER_PER_TICK`    | `0.035` | Base hunger increase per tick (scaled by metabolism)       |
-| `HUNGER_DEATH`       | `1.0`   | Hunger level at which agent dies                           |
-| `MAX_AGE`            | `700`   | Maximum lifespan in ticks                                  |
-| `VISION_MIN/MAX`     | `1 / 6` | Heritable trait range (cells of sight radius)              |
-| `METABOLISM_MIN/MAX` | `1 / 4` | Heritable trait range (hunger multiplier)                  |
-| `SUGAR_EAT_RESTORE`  | `0.35`  | Hunger reduction from eating 1 raw sugar                   |
-| `COOKED_EAT_RESTORE` | `0.80`  | Hunger reduction from eating 1 cooked food                 |
-| `SHELTER_EAT_BONUS`  | `1.25`  | Extra hunger restoration multiplier when eating near shelter |
-| `CARRIED_SUGAR_SPOIL_CHANCE` | `0.03` | Per-tick spoilage chance for carried sugar             |
-| `CARRIED_COOKED_SPOIL_CHANCE` | `0.04` | Per-tick spoilage chance for carried cooked food      |
-| `SHELTER_CARRIED_SPOIL_MULT` | `0.45` | Carried-food spoilage multiplier for agents with completed home |
-| `STORED_SUGAR_SPOIL_CHANCE` | `0.01` | Per-tick spoilage chance for stored sugar               |
-| `STORED_COOKED_SPOIL_CHANCE` | `0.015` | Per-tick spoilage chance for stored cooked food       |
-| `METAL_CARRY_CAP` | `1.5` | Maximum carried metal per agent                                    |
-| `HUNGER_NOFOOD_FORAGE` | `0.72` | Hunger threshold for emergency sugar-forage when inventory is empty |
-| `COOK_SUGAR`         | `2`     | Sugar cost to cook one batch                               |
-| `COOK_WOOD`          | `1`     | Wood cost to cook one batch                                |
-| `AXE_DUR`            | `50`    | Axe uses before breaking                                   |
-| `SPADE_DUR`          | `50`    | Spade uses before breaking                                 |
-| `PICK_DUR`           | `50`    | Pickaxe uses before breaking                               |
-| `AXE_BONUS`          | `2.0`   | Wood harvest multiplier when holding axe                   |
-| `SPADE_BONUS`        | `2.0`   | Sugar harvest multiplier when holding spade                |
-| `PICK_BONUS`         | `2.0`   | Metal harvest multiplier when holding pickaxe              |
-| `TOOL_WOOD`          | `2`     | Wood cost for any tool                                     |
-| `TOOL_METAL`         | `1`     | Metal cost for any tool                                    |
-| `SHELTER_WOOD`       | `4`     | Wood needed to build a shelter                             |
-| `SHELTER_BUILD`      | `6`     | Ticks to complete a shelter                                |
-| `SHELTER_CAP`        | `3`     | Maximum resident capacity                                  |
-| `HOUSE_WOOD`         | `8`     | Total wood needed to build a house                         |
-| `HOUSE_BUILD`        | `16`    | Ticks to complete a house                                  |
-| `HOUSE_CAP`          | `5`     | Maximum resident capacity                                  |
-| `REPRO_MIN_SUGAR`    | `5`     | Minimum sugar both agents must hold to reproduce           |
-| `REPRO_COOLDOWN`     | `60`    | Ticks before an agent can reproduce again                  |
-| `AGE_TODDLER`        | `20`    | Ticks in toddler phase                                     |
-| `AGE_CHILD`          | `60`    | Ticks in child phase                                       |
-| `AGE_YOUTH`          | `120`   | Ticks in youth phase                                       |
-| `IDLE_THRESHOLD`     | `1`     | Consecutive idle ticks before idea discovery can trigger   |
-| `DISCOVER_CHANCE`    | `0.08`  | Base probability of discovering a new idea per idle check  |
-| `SPREAD_CHANCE`      | `0.03`  | Base probability of learning an idea from a nearby agent   |
-| `MEM_SHARE_CHANCE`   | `0.12`  | Per-tick probability of sharing memory with a nearby agent |
-| `MEM_CAP`            | `200`   | Maximum memory entries per agent                           |
-| `TRADE_RANGE`        | `2`     | Manhattan distance within which trading can occur          |
-| `DEFAULT_TICK_MS`    | `1000`  | Default milliseconds between ticks                         |
-| `HUNGER_ABANDON_NAV` | `0.85`  | Hunger level above which navigation is abandoned for food  |
+| Key                           | Default | Description                                                         |
+| ----------------------------- | ------- | ------------------------------------------------------------------- |
+| `GRID_W`                      | `100`   | Grid width in cells                                                 |
+| `GRID_H`                      | `100`   | Grid height in cells                                                |
+| `CELL_PX`                     | `7`     | Pixels per cell                                                     |
+| `SUGAR_MAX`                   | `10`    | Maximum sugar capacity per cell                                     |
+| `WOOD_MAX`                    | `8`     | Maximum wood capacity per cell                                      |
+| `METAL_MAX`                   | `5`     | Maximum metal capacity per cell                                     |
+| `SUGAR_REGEN`                 | `0.25`  | Sugar regenerated per tick per cell                                 |
+| `WOOD_REGEN`                  | `0.08`  | Wood regenerated per tick per cell                                  |
+| `METAL_REGEN`                 | `0.025` | Metal regenerated per tick per cell                                 |
+| `INITIAL_AGENTS`              | `80`    | Agents spawned at simulation start                                  |
+| `POP_CAP`                     | `4000`  | Soft population ceiling; no reproduction above this                 |
+| `HUNGER_PER_TICK`             | `0.035` | Base hunger increase per tick (scaled by metabolism)                |
+| `HUNGER_DEATH`                | `1.0`   | Hunger level at which agent dies                                    |
+| `MAX_AGE`                     | `700`   | Maximum lifespan in ticks                                           |
+| `VISION_MIN/MAX`              | `1 / 6` | Heritable trait range (cells of sight radius)                       |
+| `METABOLISM_MIN/MAX`          | `1 / 4` | Heritable trait range (hunger multiplier)                           |
+| `SUGAR_EAT_RESTORE`           | `0.35`  | Hunger reduction from eating 1 raw sugar                            |
+| `COOKED_EAT_RESTORE`          | `0.80`  | Hunger reduction from eating 1 cooked food                          |
+| `SHELTER_EAT_BONUS`           | `1.25`  | Extra hunger restoration multiplier when eating near shelter        |
+| `CARRIED_SUGAR_SPOIL_CHANCE`  | `0.03`  | Per-tick spoilage chance for carried sugar                          |
+| `CARRIED_COOKED_SPOIL_CHANCE` | `0.04`  | Per-tick spoilage chance for carried cooked food                    |
+| `SHELTER_CARRIED_SPOIL_MULT`  | `0.45`  | Carried-food spoilage multiplier for agents with completed home     |
+| `STORED_SUGAR_SPOIL_CHANCE`   | `0.01`  | Per-tick spoilage chance for stored sugar                           |
+| `STORED_COOKED_SPOIL_CHANCE`  | `0.015` | Per-tick spoilage chance for stored cooked food                     |
+| `METAL_CARRY_CAP`             | `1.5`   | Maximum carried metal per agent                                     |
+| `HUNGER_NOFOOD_FORAGE`        | `0.72`  | Hunger threshold for emergency sugar-forage when inventory is empty |
+| `COOK_SUGAR`                  | `2`     | Sugar cost to cook one batch                                        |
+| `COOK_WOOD`                   | `1`     | Wood cost to cook one batch                                         |
+| `AXE_DUR`                     | `50`    | Axe uses before breaking                                            |
+| `SPADE_DUR`                   | `50`    | Spade uses before breaking                                          |
+| `PICK_DUR`                    | `50`    | Pickaxe uses before breaking                                        |
+| `AXE_BONUS`                   | `2.0`   | Wood harvest multiplier when holding axe                            |
+| `SPADE_BONUS`                 | `2.0`   | Sugar harvest multiplier when holding spade                         |
+| `PICK_BONUS`                  | `2.0`   | Metal harvest multiplier when holding pickaxe                       |
+| `TOOL_WOOD`                   | `2`     | Wood cost for any tool                                              |
+| `TOOL_METAL`                  | `1`     | Metal cost for any tool                                             |
+| `SHELTER_WOOD`                | `4`     | Wood needed to build a shelter                                      |
+| `SHELTER_BUILD`               | `6`     | Ticks to complete a shelter                                         |
+| `SHELTER_CAP`                 | `3`     | Maximum resident capacity                                           |
+| `HOUSE_WOOD`                  | `8`     | Total wood needed to build a house                                  |
+| `HOUSE_BUILD`                 | `16`    | Ticks to complete a house                                           |
+| `HOUSE_CAP`                   | `5`     | Maximum resident capacity                                           |
+| `REPRO_MIN_SUGAR`             | `5`     | Minimum sugar both agents must hold to reproduce                    |
+| `REPRO_COOLDOWN`              | `60`    | Ticks before an agent can reproduce again                           |
+| `AGE_TODDLER`                 | `20`    | Ticks in toddler phase                                              |
+| `AGE_CHILD`                   | `60`    | Ticks in child phase                                                |
+| `AGE_YOUTH`                   | `120`   | Ticks in youth phase                                                |
+| `IDLE_THRESHOLD`              | `1`     | Consecutive idle ticks before idea discovery can trigger            |
+| `DISCOVER_CHANCE`             | `0.08`  | Base probability of discovering a new idea per idle check           |
+| `SPREAD_CHANCE`               | `0.03`  | Base probability of learning an idea from a nearby agent            |
+| `MEM_SHARE_CHANCE`            | `0.12`  | Per-tick probability of sharing memory with a nearby agent          |
+| `MEM_CAP`                     | `200`   | Maximum memory entries per agent                                    |
+| `TRADE_RANGE`                 | `2`     | Manhattan distance within which trading can occur                   |
+| `DEFAULT_TICK_MS`             | `1`     | Default milliseconds between ticks                                  |
+| `HUNGER_PAUSE_PLAN`           | `0.6`   | Hunger threshold where agents pause plans to eat from inventory     |
+| `HUNGER_ABORT_PLAN_NOFOOD`    | `0.72`  | Hunger threshold where plans abort if no edible inventory exists    |
+| `PLAN_RECONSIDER_MAX_CHANCE`  | `0.08`  | Max per-tick chance low-integrity agents abandon current plan       |
+| `STAY_IDLE_MAX_HUNGER`        | `0.4`   | Max hunger to enter the stay-idle plan                              |
+| `STAY_IDLE_PLAN_TICKS`        | `6`     | Number of idle-execution steps in a stay-idle plan                  |
+| `STAY_IDLE_DISCOVER_MULT`     | `2.25`  | Discovery/spread multiplier while executing stay-idle plan          |
 
 ---
 
@@ -215,20 +221,20 @@ Each tick, a non-toddler agent scores every idea in its current `ideas` Set. Ide
 
 ### Idea Catalogue
 
-| Idea            | Tier | Requires             | Description                                                                                |
-| --------------- | ---- | -------------------- | ------------------------------------------------------------------------------------------ |
-| `EAT_SUGAR`     | 0    | —                    | Consume 1 raw sugar from inventory; restore 35% hunger                                     |
-| `HARVEST_SUGAR` | 0    | —                    | Navigate to and harvest sugar; spade doubles yield                                         |
-| `CHOP_WOOD`     | 0    | —                    | Navigate to and harvest wood; axe doubles yield                                            |
-| `DIG_METAL`     | 0    | —                    | Navigate to and harvest metal; pickaxe doubles yield                                       |
-| `BUILD_SHELTER` | 0    | CHOP_WOOD            | Build a 3-capacity shelter for 4 wood, or navigate to gather wood toward that goal         |
-| `IDLE`          | 0    | —                    | Do nothing; increment idle counter (enables idea discovery)                                |
-| `COOK_FOOD`     | 1    | CHOP_WOOD            | Convert 2 sugar + 1 wood into 2 cooked food units                                          |
-| `EAT_COOKED`    | 1    | COOK_FOOD            | Consume 1 cooked food; restore 80% hunger (auto-granted with COOK_FOOD)                    |
-| `MAKE_AXE`      | 1    | CHOP_WOOD, DIG_METAL | Craft an axe (50 uses) from 2 wood + 1 metal                                               |
-| `MAKE_SPADE`    | 1    | CHOP_WOOD, DIG_METAL | Craft a spade (50 uses) from 2 wood + 1 metal                                              |
-| `MAKE_PICKAXE`  | 1    | CHOP_WOOD, DIG_METAL | Craft a pickaxe (50 uses) from 2 wood + 1 metal                                            |
-| `TRADE`         | 1    | COOK_FOOD            | Attempt bilateral voluntary exchange with a nearby agent; also shares full location memory |
+| Idea            | Tier | Requires             | Description                                                                                                                                          |
+| --------------- | ---- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EAT_SUGAR`     | 0    | —                    | Consume 1 raw sugar from inventory; restore 35% hunger                                                                                               |
+| `HARVEST_SUGAR` | 0    | —                    | Navigate to and harvest sugar; spade doubles yield                                                                                                   |
+| `CHOP_WOOD`     | 0    | —                    | Navigate to and harvest wood; axe doubles yield                                                                                                      |
+| `DIG_METAL`     | 0    | —                    | Navigate to and harvest metal; pickaxe doubles yield                                                                                                 |
+| `BUILD_SHELTER` | 0    | CHOP_WOOD            | Build a 3-capacity shelter for 4 wood, or navigate to gather wood toward that goal                                                                   |
+| `IDLE`          | 0    | —                    | Do nothing; increment idle counter (enables idea discovery)                                                                                          |
+| `COOK_FOOD`     | 1    | CHOP_WOOD            | Convert 2 sugar + 1 wood into 2 cooked food units                                                                                                    |
+| `EAT_COOKED`    | 1    | COOK_FOOD            | Consume 1 cooked food; restore 80% hunger (auto-granted with COOK_FOOD)                                                                              |
+| `MAKE_AXE`      | 1    | CHOP_WOOD, DIG_METAL | Craft an axe (50 uses) from 2 wood + 1 metal                                                                                                         |
+| `MAKE_SPADE`    | 1    | CHOP_WOOD, DIG_METAL | Craft a spade (50 uses) from 2 wood + 1 metal                                                                                                        |
+| `MAKE_PICKAXE`  | 1    | CHOP_WOOD, DIG_METAL | Craft a pickaxe (50 uses) from 2 wood + 1 metal                                                                                                      |
+| `TRADE`         | 1    | COOK_FOOD            | Attempt bilateral voluntary exchange with a nearby agent; also shares full location memory                                                           |
 | `BUILD_HOUSE`   | 2    | BUILD_SHELTER        | Collaborative construction (requires partner) on wood/empty terrain only; sugar/metal cells are invalid even when depleted; 5-capacity, 8 wood total |
 
 ### `BUILD_SHELTER` as Tier 0
@@ -327,7 +333,7 @@ Currently one dynamic need exists:
 
 **Hunger** (0.0 – 1.0): Increases by `HUNGER_PER_TICK × metabolism / 2.5` each tick. When it reaches 1.0 the agent dies. Hunger modulates the score of all food-related ideas multiplicatively, ensuring that a starving agent prioritises eating above all else regardless of its values.
 
-The hunger threshold for abandoning navigation (`HUNGER_ABANDON_NAV = 0.85`) is separate from the death threshold and represents the point at which survival instinct overrides commitment to a plan.
+Planning reacts to hunger in two stages: at `HUNGER_PAUSE_PLAN`, agents temporarily pause plans to eat if they have food; at `HUNGER_ABORT_PLAN_NOFOOD`, they abort plans when they have no edible inventory.
 
 ### Memory
 
@@ -357,36 +363,50 @@ Agents progress through four phases based on age:
 Each tick, after hunger update, a non-toddler agent executes:
 
 ```
-1. _updateMemory(world)   — scan vision, update memory map
+1. If a plan exists: execute current plan step (movement/idea/gather/deposit)
+  - pause to eat when hunger is high and food is available
+  - abort when severely hungry and no food is available
+  - low-integrity agents may occasionally drop plans and re-score
 
-2. Navigation commitment check:
-   IF navTarget is set:
-     IF hunger > HUNGER_ABANDON_NAV AND inventory has food:
-       clear navTarget (survival emergency)
-     ELSE IF arrived at navTarget:
-       execute navIdea; clear navTarget
-     ELSE:
-       step one cell toward navTarget; return
+2. Emergency no-food forage:
+  If hunger is high and inventory food is empty, force sugar forage behavior.
 
-3. Score all ideas in agent.ideas where tier ≤ 1:
+3. Plan formation stage:
+  - form shelter stockpile plan when a completed home is understocked
+  - form stay-idle plan when the home is well stocked and hunger is low
+  - any plan can only be formed if all idea steps are already known
+
+4. Score all ideas in agent.ideas where tier ≤ 1:
    For each idea: compute score(agent, world)
    Tier-1 ideas: multiply score by (1 + patience × 0.35)
    Pick idea with highest score
 
-4. IF best idea CAN execute:
+5. IF best idea CAN execute:
    exec(agent, world); reset idleTicks
 
-5. IF best idea CANNOT execute AND idea has needsRes:
+6. IF best idea CANNOT execute AND idea has needsRes:
    Call findResource(x, y, needsRes, vision, memory)
    IF target found AND target ≠ current cell:
-     Set navTarget = target, navIdea = ideaKey
-     Step toward target; return
+    Build a NAVIGATE_IDEA plan (MOVE_TO → EXEC_IDEA)
+    and execute its first step
    IF target == current cell:
      Re-attempt exec (resource is here but something else blocked)
 
-6. IF no actionable idea:
+7. IF no actionable idea:
    Increment idleTicks; call _tryDiscover(world)
 ```
+
+### Planning Module
+
+Planning structures and builders live in `src/planning.ts`. Agent decision code in `src/Agent.ts` creates plans via this module and executes plan steps in the main tick loop.
+
+Current plan types:
+
+- `NAVIGATE_IDEA`: move to a target cell, then execute one idea
+- `SHELTER_STOCKPILE`: gather/deposit resources until home reserves reach target levels
+- `STAY_IDLE`: return to home and intentionally idle for several steps when fed and well stocked
+
+An agent can hold only one active plan at a time.
 
 ### Idea Discovery
 
@@ -401,6 +421,8 @@ If successful, the agent picks a random idea from the eligible pool (Tier 1 idea
 If successful, the agent picks a random agent within range 2 and learns one of their ideas that the agent doesn't know (subject to prerequisites). This models casual conversation and cultural diffusion.
 
 Both rolls reset `idleTicks` to 0 on success.
+
+While executing the `STAY_IDLE` plan, both discovery and spread rolls are multiplied by `STAY_IDLE_DISCOVER_MULT`, modeling higher idea-formation odds during safe, low-pressure downtime.
 
 ### Reproduction
 
@@ -471,13 +493,13 @@ Each tick, the renderer builds an agent position map (`Map<cellIndex, Agent[]>`)
 
 **Agent rendering:** Agent dots are drawn on top of the cell background. Colour encodes phase and navigation state:
 
-| Colour                | Meaning                              |
-| --------------------- | ------------------------------------ |
-| `#ff4040` red         | Adult, not navigating                |
-| `#44aaff` blue        | Any adult with an active `navTarget` |
-| `#ff8840` orange      | Youth                                |
-| `#ffcc66` yellow      | Child                                |
-| `#ffee99` pale yellow | Toddler                              |
+| Colour                | Meaning                               |
+| --------------------- | ------------------------------------- |
+| `#ff4040` red         | Adult, not currently executing a plan |
+| `#44aaff` blue        | Any adult with an active plan         |
+| `#ff8840` orange      | Youth                                 |
+| `#ffcc66` yellow      | Child                                 |
+| `#ffee99` pale yellow | Toddler                               |
 
 When multiple agents occupy one cell, the count is printed in white over the dot.
 

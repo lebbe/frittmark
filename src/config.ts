@@ -74,4 +74,9 @@ export const CFG = {
   HUNGER_ABORT_PLAN_NOFOOD: 0.72,
   // Low-integrity agents may occasionally drop a plan and re-score ideas.
   PLAN_RECONSIDER_MAX_CHANCE: 0.08,
+
+  // When fed and home is well stocked, agents can pause work and reflect.
+  STAY_IDLE_MAX_HUNGER: 0.4,
+  STAY_IDLE_PLAN_TICKS: 6,
+  STAY_IDLE_DISCOVER_MULT: 2.25,
 }
