@@ -55,12 +55,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 
   <div class="panel">
     <div class="panel-title">Inventory (all agents)</div>
-    <div class="stat-grid">
-      <span class="sk">Sugar</span><span class="sv" id="s-sugar">—</span>
-      <span class="sk">Wood</span><span class="sv" id="s-wood">—</span>
-      <span class="sk">Metal</span><span class="sv" id="s-metal">—</span>
-      <span class="sk">Cooked</span><span class="sv" id="s-cooked">—</span>
-    </div>
+    <div class="stat-grid" id="s-inventory"></div>
   </div>
 
   <div class="panel">

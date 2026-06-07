@@ -52,6 +52,9 @@ type PlanningCell = {
   ticksSinceTraversal?: number
   roadTraversals?: number
   building: {
+    type: 'shelter' | 'house'
+    ownerId: number
+    residents: number[]
     complete: boolean
     inv?: { sugar: number; wood: number; metal: number; cooked: number }
   } | null
@@ -454,11 +457,11 @@ export function createTradeRebalancePlan(
 
 export function createRecoveryBufferPlan(
   a: PlanningAgent,
-  _world: PlanningWorld,
+  world: PlanningWorld,
 ): AgentPlan | null {
   const needsSugar = a.inventory.sugar < 3
   const needsWood = a.inventory.wood < 2
-  const needsMetal = a.inventory.metal < 1
+  const needsMetal = resourceTotal(a, world, 'metal', true) < 0.5
   if (!needsSugar && !needsWood && !needsMetal) return null
   if (a.needs.hunger > 0.7) return null
 
@@ -489,8 +492,8 @@ export function createRecoveryBufferPlan(
       label: 'rebuild metal buffer',
       ideaId: 'DIG_METAL',
       resource: 'metal',
-      targetTotal: 1,
-      includeHomeInventory: false,
+      targetTotal: 0.5,
+      includeHomeInventory: true,
     })
   }
 
@@ -501,35 +504,52 @@ export function createRecoveryBufferPlan(
 
 export function createHouseUpgradePlan(
   a: PlanningAgent,
-  _world: PlanningWorld,
+  world: PlanningWorld,
 ): AgentPlan | null {
   if (!a.ideas.has('BUILD_HOUSE')) return null
-  if (a.homeCell) return null
+  if (!a.homeCell) return null
+
+  const home = world.cell(a.homeCell.x, a.homeCell.y)
+  if (!home.building || !home.building.complete) return null
+  if (home.building.type !== 'shelter') return null
+  if (!home.building.residents.includes(a.id)) return null
+
+  const totalWood = a.inventory.wood + (home.building.inv?.wood ?? 0)
 
   const steps: PlanStep[] = []
-  if (a.inventory.wood < CFG.HOUSE_WOOD && a.ideas.has('CHOP_WOOD')) {
+  if (totalWood < CFG.HOUSE_WOOD && a.ideas.has('CHOP_WOOD')) {
     steps.push({
       kind: 'GATHER_UNTIL',
-      label: 'gather wood for house',
+      label: 'gather wood for house upgrade',
       ideaId: 'CHOP_WOOD',
       resource: 'wood',
       targetTotal: CFG.HOUSE_WOOD,
-      includeHomeInventory: false,
+      includeHomeInventory: true,
     })
   }
   if (a.inventory.rock < CFG.HOUSE_ROCK && a.ideas.has('QUARRY_ROCK')) {
     steps.push({
       kind: 'GATHER_UNTIL',
-      label: 'gather rock for house foundation',
+      label: 'gather rock for house upgrade',
       ideaId: 'QUARRY_ROCK',
       resource: 'rock',
       targetTotal: CFG.HOUSE_ROCK,
       includeHomeInventory: false,
     })
   }
+
+  if (!isNearHome(a)) {
+    steps.push({
+      kind: 'MOVE_TO',
+      label: `return home ${a.homeCell.x},${a.homeCell.y}`,
+      x: a.homeCell.x,
+      y: a.homeCell.y,
+    })
+  }
+
   steps.push({
     kind: 'EXEC_IDEA',
-    label: 'attempt house construction',
+    label: 'upgrade shelter into house',
     ideaId: 'BUILD_HOUSE',
   })
 

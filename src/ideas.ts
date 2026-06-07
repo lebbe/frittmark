@@ -104,6 +104,32 @@ type IdeaWorld = {
   agentsNear(x: number, y: number, range: number): IdeaAgent[]
 }
 
+function getHomeShelterCell(a: IdeaAgent, w: IdeaWorld): IdeaCell | null {
+  if (!a.homeCell) return null
+  const c = w.cell(a.homeCell.x, a.homeCell.y)
+  if (!c.building || !c.building.complete) return null
+  if (c.building.type !== 'shelter') return null
+  if (!c.building.residents.includes(a.id)) return null
+  return c
+}
+
+function houseUpgradeWoodTotal(a: IdeaAgent, home: IdeaCell): number {
+  return a.inventory.wood + (home.building?.inv?.wood ?? 0)
+}
+
+function spendHouseUpgradeWood(a: IdeaAgent, home: IdeaCell, amount: number): boolean {
+  const available = houseUpgradeWoodTotal(a, home)
+  if (available < amount) return false
+
+  const fromInventory = Math.min(a.inventory.wood, amount)
+  a.inventory.wood -= fromInventory
+  const remaining = amount - fromInventory
+  if (remaining > 0 && home.building?.inv) {
+    home.building.inv.wood = Math.max(0, home.building.inv.wood - remaining)
+  }
+  return true
+}
+
 type IdeaDef = {
   tier: 0 | 1 | 2
   requires: string[]
@@ -113,10 +139,13 @@ type IdeaDef = {
   exec(a: IdeaAgent, w: IdeaWorld): boolean
 }
 
-function isHousePlotAllowed(c: IdeaCell): boolean {
-  // Houses are forbidden on any sugar/metal terrain, even if currently depleted.
-  // Valid plots are wood-bearing or fully empty cells without sugar/metal traces.
-  return c.sugarCap === 0 && c.metalCap === 0 && c.sugar <= 0 && c.metal <= 0
+function isBuildingPlotAllowed(c: IdeaCell): boolean {
+  // Buildings are only allowed in forest cells (wood-bearing) or empty cells.
+  // Sugar fields are always forbidden, even when currently depleted.
+  const isForest = c.woodCap > 0
+  const isEmpty =
+    c.sugarCap === 0 && c.woodCap === 0 && c.metalCap === 0 && c.rockCap === 0
+  return c.sugarCap === 0 && (isForest || isEmpty)
 }
 
 function isSheltered(a: IdeaAgent, w: IdeaWorld): boolean {
@@ -303,6 +332,7 @@ export const IDEAS: Record<string, IdeaDef> = {
     needsRes: 'wood',
     score(a, w) {
       if (a.homeCell) return 0
+      if (!isBuildingPlotAllowed(w.cell(a.x, a.y))) return 0
       const exploreBonus =
         a.inventory.sugar >= CFG.REPRO_MIN_SUGAR && a.needs.hunger < 0.65
           ? 1.15
@@ -326,12 +356,17 @@ export const IDEAS: Record<string, IdeaDef> = {
       return (
         !a.homeCell &&
         a.inventory.wood >= CFG.SHELTER_WOOD &&
-        !w.cell(a.x, a.y).building
+        !w.cell(a.x, a.y).building &&
+        isBuildingPlotAllowed(w.cell(a.x, a.y))
       )
     },
     exec(a, w) {
       // If we CAN build, build
-      if (a.inventory.wood >= CFG.SHELTER_WOOD && !w.cell(a.x, a.y).building) {
+      if (
+        a.inventory.wood >= CFG.SHELTER_WOOD &&
+        !w.cell(a.x, a.y).building &&
+        isBuildingPlotAllowed(w.cell(a.x, a.y))
+      ) {
         a.inventory.wood -= CFG.SHELTER_WOOD
         w.cell(a.x, a.y).building = {
           type: 'shelter',
@@ -584,72 +619,49 @@ export const IDEAS: Record<string, IdeaDef> = {
     },
   },
 
-  // ---- TIER 2: Abstract (discovered only inside a finished house) ----
+  // ---- TIER 2: Abstract (discoverable while sheltered in a finished home) ----
 
   BUILD_HOUSE: {
     tier: 2,
     requires: ['BUILD_SHELTER'],
     needsRes: 'wood',
     score(a, w) {
-      if (
-        a.homeCell ||
-        a.inventory.wood < CFG.HOUSE_WOOD ||
-        a.inventory.rock < CFG.HOUSE_ROCK
-      )
-        return 0
-      if (!isHousePlotAllowed(w.cell(a.x, a.y))) return 0
-      const partner = w
-        .agentsNear(a.x, a.y, 1)
-        .find((b) => b.id !== a.id && b.ideas.has('BUILD_HOUSE') && !b.homeCell)
-      return partner ? a.values.building * 7 : 0
+      const home = getHomeShelterCell(a, w)
+      if (!home || !a.homeCell) return 0
+      if (a.x !== a.homeCell.x || a.y !== a.homeCell.y) return 0
+      if (houseUpgradeWoodTotal(a, home) < CFG.HOUSE_WOOD) return 0
+      if (a.inventory.rock < CFG.HOUSE_ROCK) return 0
+      return a.values.building * 7
     },
     canDo(a, w) {
-      if (
-        a.homeCell ||
-        a.inventory.wood < CFG.HOUSE_WOOD ||
-        a.inventory.rock < CFG.HOUSE_ROCK
-      )
-        return false
-      if (w.cell(a.x, a.y).building) return false
-      if (!isHousePlotAllowed(w.cell(a.x, a.y))) return false
-      return w
-        .agentsNear(a.x, a.y, 1)
-        .some((b) => b.id !== a.id && b.ideas.has('BUILD_HOUSE') && !b.homeCell)
+      const home = getHomeShelterCell(a, w)
+      if (!home || !a.homeCell) return false
+      if (a.x !== a.homeCell.x || a.y !== a.homeCell.y) return false
+      if (houseUpgradeWoodTotal(a, home) < CFG.HOUSE_WOOD) return false
+      if (a.inventory.rock < CFG.HOUSE_ROCK) return false
+      return true
     },
     exec(a, w) {
-      const p = w
-        .agentsNear(a.x, a.y, 1)
-        .find((b) => b.id !== a.id && b.ideas.has('BUILD_HOUSE') && !b.homeCell)
-      if (!p || w.cell(a.x, a.y).building) return false
-      if (!isHousePlotAllowed(w.cell(a.x, a.y))) return false
-      const halfWood = Math.floor(CFG.HOUSE_WOOD / 2),
-        restWood = CFG.HOUSE_WOOD - halfWood
-      const halfRock = Math.floor(CFG.HOUSE_ROCK / 2),
-        restRock = CFG.HOUSE_ROCK - halfRock
-      if (
-        a.inventory.wood < halfWood ||
-        p.inventory.wood < restWood ||
-        a.inventory.rock < halfRock ||
-        p.inventory.rock < restRock
-      )
-        return false
-      a.inventory.wood -= halfWood
-      p.inventory.wood -= restWood
-      a.inventory.rock -= halfRock
-      p.inventory.rock -= restRock
-      const c = w.cell(a.x, a.y)
-      c.building = {
+      const home = getHomeShelterCell(a, w)
+      if (!home || !a.homeCell) return false
+      if (a.x !== a.homeCell.x || a.y !== a.homeCell.y) return false
+      if (houseUpgradeWoodTotal(a, home) < CFG.HOUSE_WOOD) return false
+      if (a.inventory.rock < CFG.HOUSE_ROCK) return false
+
+      if (!spendHouseUpgradeWood(a, home, CFG.HOUSE_WOOD)) return false
+      a.inventory.rock -= CFG.HOUSE_ROCK
+
+      const existingResidents = home.building?.residents ?? [a.id]
+      home.building = {
         type: 'house',
         ownerId: a.id,
-        residents: [a.id, p.id],
+        residents: [...existingResidents],
         progress: 0,
         progressMax: CFG.HOUSE_BUILD,
         complete: false,
         capacity: CFG.HOUSE_CAP,
         inv: { sugar: 0, wood: 0, metal: 0, cooked: 0 },
       }
-      a.homeCell = { x: a.x, y: a.y }
-      p.homeCell = { x: a.x, y: a.y }
       return true
     },
   },

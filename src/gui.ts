@@ -14,6 +14,53 @@ let loop: ReturnType<typeof setTimeout> | null = null
 let modalAgent: Agent | null = null
 let modalHouse: { x: number; y: number } | null = null
 
+const INVENTORY_ORDER: Array<keyof Agent['inventory']> = [
+  'sugar',
+  'wood',
+  'metal',
+  'rock',
+  'cooked',
+  'axe',
+  'spade',
+  'pick',
+]
+
+const INVENTORY_LABELS: Partial<Record<keyof Agent['inventory'], string>> = {
+  sugar: 'Sugar',
+  wood: 'Wood',
+  metal: 'Metal',
+  rock: 'Rock',
+  cooked: 'Cooked food',
+  axe: 'Axe (dur)',
+  spade: 'Spade (dur)',
+  pick: 'Pickaxe (dur)',
+}
+
+function formatInventoryLabel(key: keyof Agent['inventory']): string {
+  return (
+    INVENTORY_LABELS[key] ||
+    String(key)
+      .replace(/([A-Z])/g, ' $1')
+      .replace(/_/g, ' ')
+      .toLowerCase()
+  )
+}
+
+function sortInventoryKeys(
+  keys: Array<keyof Agent['inventory']>,
+): Array<keyof Agent['inventory']> {
+  const order = new Map<keyof Agent['inventory'], number>()
+  INVENTORY_ORDER.forEach((k, i) => order.set(k, i))
+  return [...keys].sort((a, b) => {
+    const ia = order.get(a)
+    const ib = order.get(b)
+    if (ia !== undefined && ib !== undefined) return ia - ib
+    if (ia !== undefined) return -1
+    if (ib !== undefined) return 1
+    return String(a).localeCompare(String(b))
+  })
+}
+
 function mustEl<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id)
   if (!el) throw new Error(`Missing required element #${id}`)
@@ -94,21 +141,24 @@ export function updateUI(): void {
       .length,
   )
 
-  let sugar = 0
-  let wood = 0
-  let metal = 0
-  let cooked = 0
+  const totals = new Map<keyof Agent['inventory'], number>()
   for (const a of agents) {
-    sugar += a.inventory.sugar
-    wood += a.inventory.wood
-    metal += a.inventory.metal
-    cooked += a.inventory.cooked || 0
+    for (const key of Object.keys(a.inventory) as Array<keyof Agent['inventory']>) {
+      totals.set(key, (totals.get(key) || 0) + (a.inventory[key] || 0))
+    }
   }
 
-  mustEl('s-sugar').textContent = String(Math.floor(sugar))
-  mustEl('s-wood').textContent = String(Math.floor(wood))
-  mustEl('s-metal').textContent = String(Math.floor(metal))
-  mustEl('s-cooked').textContent = String(Math.floor(cooked))
+  const invKeys = sortInventoryKeys([
+    ...new Set(
+      [...INVENTORY_ORDER, ...totals.keys()] as Array<keyof Agent['inventory']>,
+    ),
+  ])
+  mustEl('s-inventory').innerHTML = invKeys
+    .map(
+      (key) =>
+        `<span class="sk">${formatInventoryLabel(key)}</span><span class="sv">${Math.floor(totals.get(key) || 0)}</span>`,
+    )
+    .join('')
 
   const panel = mustEl('ideas-panel')
   if (panel.style.display !== 'none') renderIdeasRegistry()
@@ -239,21 +289,14 @@ function renderModal(): void {
     .map(([k, v]) => barRow(k, v, 'bar-teal'))
     .join('')
 
-  const invKeys: Array<[keyof Agent['inventory'], string]> = [
-    ['sugar', 'Sugar'],
-    ['wood', 'Wood'],
-    ['metal', 'Metal'],
-    ['rock', 'Rock'],
-    ['cooked', 'Cooked food'],
-    ['axe', 'Axe (dur)'],
-    ['spade', 'Spade (dur)'],
-    ['pick', 'Pickaxe (dur)'],
-  ]
+  const invKeys = sortInventoryKeys(
+    Object.keys(a.inventory) as Array<keyof Agent['inventory']>,
+  )
   mustEl('m-inventory').innerHTML = invKeys
     .map(
-      ([k, label]) => `
+      (k) => `
     <div class="inv-row">
-      <span class="inv-key">${label}</span>
+      <span class="inv-key">${formatInventoryLabel(k)}</span>
       <span class="inv-val" id="inv-${k}">${a.inventory[k] || 0}</span>
       <span class="inv-spacer"></span>
       <button class="digi-btn" onclick="modInv('${k}',-1)">−</button>

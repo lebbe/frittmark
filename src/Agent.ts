@@ -892,6 +892,14 @@ export class Agent {
 
     if (
       !this.plan &&
+      this._createStayIdlePlan(world) &&
+      this._executePlan(world)
+    ) {
+      return
+    }
+
+    if (
+      !this.plan &&
       this._createRecoveryBufferPlan(world) &&
       this._executePlan(world)
     ) {
@@ -909,14 +917,6 @@ export class Agent {
     if (
       !this.plan &&
       this._createBuildRoadNetworkPlan(world) &&
-      this._executePlan(world)
-    ) {
-      return
-    }
-
-    if (
-      !this.plan &&
-      this._createStayIdlePlan(world) &&
       this._executePlan(world)
     ) {
       return
