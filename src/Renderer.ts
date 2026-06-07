@@ -3,6 +3,7 @@
 // ================================================================
 
 import { CFG } from './config'
+import { getRouteType } from './paths'
 
 type RenderAgent = {
   x: number
@@ -17,6 +18,7 @@ type RenderCell = {
   metal: number
   rock: number
   path: boolean
+  routeType?: 'none' | 'dirt_path' | 'stone_road'
   building: {
     type: 'shelter' | 'house'
     complete: boolean
@@ -37,6 +39,7 @@ const SUGAR = [200, 160, 30]
 const WOOD = [50, 105, 60]
 const METAL = [75, 115, 140]
 const ROCK = [110, 110, 110]
+const DIRT_PATH = [145, 110, 72]
 const PATH = [150, 150, 150]
 
 function blendRGB(rgb: number[], t: number): string {
@@ -96,8 +99,10 @@ export class Renderer {
             ctx.fillRect(dx + 1, dy + px - 3, Math.round((px - 2) * pct), 2)
           }
         } else {
+          const routeType = getRouteType(c)
           let col
-          if (c.path) col = blendRGB(PATH, 0.75)
+          if (routeType === 'stone_road') col = blendRGB(PATH, 0.85)
+          else if (routeType === 'dirt_path') col = blendRGB(DIRT_PATH, 0.78)
           else if (
             c.sugar >= c.wood &&
             c.sugar >= c.metal &&

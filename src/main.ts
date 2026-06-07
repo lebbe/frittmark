@@ -84,7 +84,8 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
       <div class="legend-row"><div class="sw legend-wood"></div>Wood</div>
       <div class="legend-row"><div class="sw legend-metal"></div>Metal</div>
       <div class="legend-row"><div class="sw legend-rock"></div>Rock</div>
-      <div class="legend-row"><div class="sw legend-path"></div>Stone path</div>
+      <div class="legend-row"><div class="sw legend-dirt"></div>Dirt path</div>
+      <div class="legend-row"><div class="sw legend-path"></div>Stone road</div>
       <div class="legend-row"><div class="sw legend-adult"></div>Adult agent</div>
       <div class="legend-row"><div class="sw legend-nav"></div>Navigating agent</div>
       <div class="legend-row"><div class="sw legend-young"></div>Toddler / Child</div>
@@ -252,8 +253,10 @@ window.addEventListener('DOMContentLoaded', () => {
       const b = cell.building
       const progress = `${b.progress}/${b.progressMax}`
       status = `Cell (${x}, ${y})\nType: ${b.type}${b.complete ? '' : ' (under construction)'}\nProgress: ${progress}\nInventory: sugar ${Math.floor(b.inv.sugar)}, wood ${Math.floor(b.inv.wood)}, metal ${Math.floor(b.inv.metal)}, cooked ${Math.floor(b.inv.cooked)}`
-    } else if (cell.path) {
-      status = `Cell (${x}, ${y})\nType: stone path`
+    } else if (cell.routeType === 'stone_road' || cell.path) {
+      status = `Cell (${x}, ${y})\nType: stone road`
+    } else if (cell.routeType === 'dirt_path') {
+      status = `Cell (${x}, ${y})\nType: dirt path`
     } else if (totalResource > 0) {
       const dominant =
         cell.sugar >= cell.wood &&

@@ -12,6 +12,7 @@ export type PlanName =
   | 'RECOVERY_BUFFER'
   | 'HOUSE_UPGRADE'
   | 'PARENTING_PROVISION'
+  | 'BUILD_ROAD_NETWORK'
 export const PLAN_REGISTRY: PlanName[] = [
   'NAVIGATE_IDEA',
   'SHELTER_STOCKPILE',
@@ -23,6 +24,7 @@ export const PLAN_REGISTRY: PlanName[] = [
   'RECOVERY_BUFFER',
   'HOUSE_UPGRADE',
   'PARENTING_PROVISION',
+  'BUILD_ROAD_NETWORK',
 ]
 
 export type PlanStep =
@@ -44,6 +46,11 @@ export type AgentPlan = {
 }
 
 type PlanningCell = {
+  path: boolean
+  routeType?: 'none' | 'dirt_path' | 'stone_road'
+  trailWear?: number
+  ticksSinceTraversal?: number
+  roadTraversals?: number
   building: {
     complete: boolean
     inv?: { sugar: number; wood: number; metal: number; cooked: number }
@@ -51,6 +58,7 @@ type PlanningCell = {
 }
 
 type PlanningWorld = {
+  inBounds(x: number, y: number): boolean
   cell(x: number, y: number): PlanningCell
   agentsNear?(x: number, y: number, range: number): PlanningAgent[]
 }
@@ -603,4 +611,71 @@ export function createParentingProvisionPlan(
 
   if (!canFormPlanWithKnownIdeas(a.ideas, steps)) return null
   return { name: 'PARENTING_PROVISION', steps }
+}
+
+export function createBuildRoadNetworkPlan(
+  a: PlanningAgent,
+  world: PlanningWorld,
+): AgentPlan | null {
+  if (!a.homeCell) return null
+  if (!a.ideas.has('UPGRADE_TO_STONE_ROAD')) return null
+  if (a.needs.hunger > 0.55) return null
+  if (!a.ideas.has('QUARRY_ROCK') && a.inventory.rock < CFG.ROAD_UPGRADE_ROCK_COST)
+    return null
+
+  const radius = 8
+  const candidates: Array<{ x: number; y: number; wear: number; dist: number }> = []
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      const x = a.homeCell.x + dx
+      const y = a.homeCell.y + dy
+      if (!world.inBounds(x, y)) continue
+      const c = world.cell(x, y)
+      if (c.building) continue
+      const routeType = c.routeType ?? (c.path ? 'stone_road' : 'none')
+      if (routeType !== 'dirt_path') continue
+      const wear = c.trailWear ?? 0
+      if (wear < CFG.TRAIL_CREATE_THRESHOLD) continue
+      const dist = Math.abs(a.x - x) + Math.abs(a.y - y)
+      candidates.push({ x, y, wear, dist })
+    }
+  }
+
+  if (candidates.length === 0) return null
+
+  candidates.sort((l, r) => {
+    if (r.wear !== l.wear) return r.wear - l.wear
+    return l.dist - r.dist
+  })
+
+  const targets = candidates.slice(0, 3)
+  const rockNeeded = targets.length * CFG.ROAD_UPGRADE_ROCK_COST
+  const steps: PlanStep[] = []
+  if (a.inventory.rock < rockNeeded && a.ideas.has('QUARRY_ROCK')) {
+    steps.push({
+      kind: 'GATHER_UNTIL',
+      label: 'gather rock for road upgrades',
+      ideaId: 'QUARRY_ROCK',
+      resource: 'rock',
+      targetTotal: rockNeeded,
+      includeHomeInventory: false,
+    })
+  }
+
+  for (const target of targets) {
+    steps.push({
+      kind: 'MOVE_TO',
+      label: `move to dirt path ${target.x},${target.y}`,
+      x: target.x,
+      y: target.y,
+    })
+    steps.push({
+      kind: 'EXEC_IDEA',
+      label: 'upgrade dirt path to stone road',
+      ideaId: 'UPGRADE_TO_STONE_ROAD',
+    })
+  }
+
+  if (!canFormPlanWithKnownIdeas(a.ideas, steps)) return null
+  return { name: 'BUILD_ROAD_NETWORK', steps }
 }

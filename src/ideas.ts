@@ -13,7 +13,8 @@
 // ================================================================
 
 import { CFG } from './config'
-import { clamp, pick, stepToward } from './utils'
+import { getNextPathStep, getRouteType, setRouteType } from './paths'
+import { clamp, pick } from './utils'
 
 type ResourceKey = 'sugar' | 'wood' | 'metal' | 'cooked'
 type ToolKey = 'axe' | 'spade' | 'pick'
@@ -67,6 +68,10 @@ type IdeaCell = {
   rock: number
   rockCap: number
   path: boolean
+  routeType?: 'none' | 'dirt_path' | 'stone_road'
+  trailWear?: number
+  ticksSinceTraversal?: number
+  roadTraversals?: number
   building: {
     type: 'shelter' | 'house'
     ownerId: number
@@ -87,8 +92,14 @@ type IdeaWorld = {
     type: 'sugar' | 'wood' | 'metal' | 'rock',
     vision: number,
     memory: IdeaAgent['memory'],
+    carriedAmount?: number,
   ): { x: number; y: number } | null
-  move(agent: IdeaAgent, x: number, y: number): void
+  move(
+    agent: IdeaAgent,
+    x: number,
+    y: number,
+    opts?: { trailWearMult?: number },
+  ): void
   cell(x: number, y: number): IdeaCell
   agentsNear(x: number, y: number, range: number): IdeaAgent[]
 }
@@ -153,23 +164,29 @@ export const IDEAS: Record<string, IdeaDef> = {
     requires: [],
     needsRes: 'sugar',
     score(a, w) {
+      if (a.inventory.sugar >= CFG.SUGAR_CARRY_CAP) return 0
       const satiety = clamp(1.2 - a.inventory.sugar / 10, 0.25, 1.2)
-      return w.findResource(a.x, a.y, 'sugar', a.vision, a.memory)
+      return w.findResource(a.x, a.y, 'sugar', a.vision, a.memory, a.inventory.sugar)
         ? a.values.survival * (1 + a.needs.hunger) * 4 * satiety
         : 0
     },
     canDo(a, w) {
-      return !!w.findResource(a.x, a.y, 'sugar', a.vision, a.memory)
+      if (a.inventory.sugar >= CFG.SUGAR_CARRY_CAP) return false
+      return !!w.findResource(a.x, a.y, 'sugar', a.vision, a.memory, a.inventory.sugar)
     },
     exec(a, w) {
-      const t = w.findResource(a.x, a.y, 'sugar', a.vision, a.memory)
+      const t = w.findResource(a.x, a.y, 'sugar', a.vision, a.memory, a.inventory.sugar)
       if (!t) return false
-      const s = stepToward(a.x, a.y, t.x, t.y)
-      w.move(a, s.x, s.y)
+      const s = getNextPathStep(w, a.x, a.y, t.x, t.y)
+      w.move(a, s.x, s.y, {
+        trailWearMult: CFG.SUGAR_HARVEST_PATH_WEAR_MULT,
+      })
       if (a.x === t.x && a.y === t.y) {
         const c = w.cell(a.x, a.y)
         const bonus = a.inventory.spade > 0 ? CFG.SPADE_BONUS : 1
-        const got = Math.min(Math.floor(c.sugar), Math.ceil(1.5 * bonus))
+        const remainCap = Math.max(0, CFG.SUGAR_CARRY_CAP - a.inventory.sugar)
+        if (remainCap <= 0) return false
+        const got = Math.min(Math.floor(c.sugar), Math.ceil(1.5 * bonus), remainCap)
         c.sugar = Math.max(0, c.sugar - got)
         a.inventory.sugar += got
         if (a.inventory.spade > 0) a.inventory.spade--
@@ -183,23 +200,27 @@ export const IDEAS: Record<string, IdeaDef> = {
     requires: [],
     needsRes: 'wood',
     score(a, w) {
+      if (a.inventory.wood >= CFG.WOOD_CARRY_CAP) return 0
       const hungerPenalty = clamp(1 - a.needs.hunger * 0.75, 0.2, 1)
-      return w.findResource(a.x, a.y, 'wood', a.vision, a.memory)
+      return w.findResource(a.x, a.y, 'wood', a.vision, a.memory, a.inventory.wood)
         ? a.values.building * 2.5 * hungerPenalty
         : 0
     },
     canDo(a, w) {
-      return !!w.findResource(a.x, a.y, 'wood', a.vision, a.memory)
+      if (a.inventory.wood >= CFG.WOOD_CARRY_CAP) return false
+      return !!w.findResource(a.x, a.y, 'wood', a.vision, a.memory, a.inventory.wood)
     },
     exec(a, w) {
-      const t = w.findResource(a.x, a.y, 'wood', a.vision, a.memory)
+      const t = w.findResource(a.x, a.y, 'wood', a.vision, a.memory, a.inventory.wood)
       if (!t) return false
-      const s = stepToward(a.x, a.y, t.x, t.y)
+      const s = getNextPathStep(w, a.x, a.y, t.x, t.y)
       w.move(a, s.x, s.y)
       if (a.x === t.x && a.y === t.y) {
         const c = w.cell(a.x, a.y)
         const bonus = a.inventory.axe > 0 ? CFG.AXE_BONUS : 1
-        const got = Math.min(Math.floor(c.wood), Math.ceil(1.5 * bonus))
+        const remainCap = Math.max(0, CFG.WOOD_CARRY_CAP - a.inventory.wood)
+        if (remainCap <= 0) return false
+        const got = Math.min(Math.floor(c.wood), Math.ceil(1.5 * bonus), remainCap)
         c.wood = Math.max(0, c.wood - got)
         a.inventory.wood += got
         if (a.inventory.axe > 0) a.inventory.axe--
@@ -215,18 +236,18 @@ export const IDEAS: Record<string, IdeaDef> = {
     score(a, w) {
       if (a.inventory.metal >= CFG.METAL_CARRY_CAP) return 0
       const hungerPenalty = clamp(1 - a.needs.hunger * 0.75, 0.2, 1)
-      return w.findResource(a.x, a.y, 'metal', a.vision, a.memory)
+      return w.findResource(a.x, a.y, 'metal', a.vision, a.memory, a.inventory.metal)
         ? a.values.metal * 3.5 * hungerPenalty
         : 0
     },
     canDo(a, w) {
       if (a.inventory.metal >= CFG.METAL_CARRY_CAP) return false
-      return !!w.findResource(a.x, a.y, 'metal', a.vision, a.memory)
+      return !!w.findResource(a.x, a.y, 'metal', a.vision, a.memory, a.inventory.metal)
     },
     exec(a, w) {
-      const t = w.findResource(a.x, a.y, 'metal', a.vision, a.memory)
+      const t = w.findResource(a.x, a.y, 'metal', a.vision, a.memory, a.inventory.metal)
       if (!t) return false
-      const s = stepToward(a.x, a.y, t.x, t.y)
+      const s = getNextPathStep(w, a.x, a.y, t.x, t.y)
       w.move(a, s.x, s.y)
       if (a.x === t.x && a.y === t.y) {
         const c = w.cell(a.x, a.y)
@@ -253,17 +274,17 @@ export const IDEAS: Record<string, IdeaDef> = {
     score(a, w) {
       const hungerPenalty = clamp(1 - a.needs.hunger * 0.8, 0.2, 1)
       const stockPenalty = clamp(1.25 - a.inventory.rock / 10, 0.3, 1.25)
-      return w.findResource(a.x, a.y, 'rock', a.vision, a.memory)
+      return w.findResource(a.x, a.y, 'rock', a.vision, a.memory, a.inventory.rock)
         ? a.values.building * 3.2 * hungerPenalty * stockPenalty
         : 0
     },
     canDo(a, w) {
-      return !!w.findResource(a.x, a.y, 'rock', a.vision, a.memory)
+      return !!w.findResource(a.x, a.y, 'rock', a.vision, a.memory, a.inventory.rock)
     },
     exec(a, w) {
-      const t = w.findResource(a.x, a.y, 'rock', a.vision, a.memory)
+      const t = w.findResource(a.x, a.y, 'rock', a.vision, a.memory, a.inventory.rock)
       if (!t) return false
-      const s = stepToward(a.x, a.y, t.x, t.y)
+      const s = getNextPathStep(w, a.x, a.y, t.x, t.y)
       w.move(a, s.x, s.y)
       if (a.x === t.x && a.y === t.y) {
         const c = w.cell(a.x, a.y)
@@ -289,7 +310,7 @@ export const IDEAS: Record<string, IdeaDef> = {
       if (a.inventory.wood < CFG.SHELTER_WOOD) {
         // Not enough wood yet — score based on how badly we want a home,
         // filtered by: do we know where wood is?
-        const woodTarget = w.findResource(a.x, a.y, 'wood', a.vision, a.memory)
+        const woodTarget = w.findResource(a.x, a.y, 'wood', a.vision, a.memory, a.inventory.wood)
         return woodTarget
           ? a.values.building *
               4 *
@@ -326,9 +347,9 @@ export const IDEAS: Record<string, IdeaDef> = {
         return true
       }
       // Otherwise navigate to wood to gather more
-      const t = w.findResource(a.x, a.y, 'wood', a.vision, a.memory)
+      const t = w.findResource(a.x, a.y, 'wood', a.vision, a.memory, a.inventory.wood)
       if (!t) return false
-      const s = stepToward(a.x, a.y, t.x, t.y)
+      const s = getNextPathStep(w, a.x, a.y, t.x, t.y)
       w.move(a, s.x, s.y)
       if (a.x === t.x && a.y === t.y) {
         const c = w.cell(a.x, a.y)
@@ -500,35 +521,37 @@ export const IDEAS: Record<string, IdeaDef> = {
     },
   },
 
-  LAY_STONE_PATH: {
+  UPGRADE_TO_STONE_ROAD: {
     tier: 1,
     requires: ['QUARRY_ROCK', 'BUILD_SHELTER'],
     needsRes: null,
     score(a, w) {
       const c = w.cell(a.x, a.y)
-      if (c.building || c.path) return 0
-      if (a.inventory.rock < CFG.STONE_PATH_ROCK_COST) return 0
+      if (c.building) return 0
+      if (getRouteType(c) !== 'dirt_path') return 0
+      if (a.inventory.rock < CFG.ROAD_UPGRADE_ROCK_COST) return 0
       if (a.needs.hunger > 0.6) return 0
       const nearHome =
         !!a.homeCell &&
         Math.abs(a.x - a.homeCell.x) <= 3 &&
         Math.abs(a.y - a.homeCell.y) <= 3
-      return nearHome ? a.values.building * 1.6 : 0
+      const trafficBonus = 1 + Math.min(1.5, (c.trailWear ?? 0) / 10)
+      return nearHome ? a.values.building * 1.6 * trafficBonus : 0
     },
     canDo(a, w) {
       const c = w.cell(a.x, a.y)
       return (
         !c.building &&
-        !c.path &&
-        a.inventory.rock >= CFG.STONE_PATH_ROCK_COST &&
+        getRouteType(c) === 'dirt_path' &&
+        a.inventory.rock >= CFG.ROAD_UPGRADE_ROCK_COST &&
         a.needs.hunger <= 0.6
       )
     },
     exec(a, w) {
       if (!this.canDo(a, w)) return false
       const c = w.cell(a.x, a.y)
-      c.path = true
-      a.inventory.rock -= CFG.STONE_PATH_ROCK_COST
+      setRouteType(c, 'stone_road')
+      a.inventory.rock -= CFG.ROAD_UPGRADE_ROCK_COST
       return true
     },
   },

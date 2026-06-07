@@ -4,7 +4,19 @@
 
 import { CFG } from './config'
 import { Agent } from './Agent'
+import {
+  applyTrailWearOnStep,
+  decayTrailWear,
+  findPath,
+  getRouteType,
+  traversalCost,
+  type RouteType,
+} from './paths'
 import { mdist, rand } from './utils'
+
+type MoveOptions = {
+  trailWearMult?: number
+}
 
 type ResourceType = 'sugar' | 'wood' | 'metal' | 'rock'
 
@@ -45,7 +57,45 @@ type Cell = {
   rock: number
   rockCap: number
   path: boolean
+  routeType: RouteType
+  trailWear: number
+  ticksSinceTraversal: number
+  roadTraversals: number
   building: Building | null
+}
+
+function carryCapFor(type: ResourceType): number {
+  if (type === 'sugar') return CFG.SUGAR_CARRY_CAP
+  if (type === 'wood') return CFG.WOOD_CARRY_CAP
+  if (type === 'metal') return CFG.METAL_CARRY_CAP
+  if (type === 'rock') return CFG.ROCK_CARRY_CAP
+  return Number.POSITIVE_INFINITY
+}
+
+function edgeDensity(world: World, x: number, y: number, type: ResourceType): number {
+  let total = 0
+  let n = 0
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue
+      const nx = x + dx
+      const ny = y + dy
+      if (!world.inBounds(nx, ny)) continue
+      const c = world.cell(nx, ny)
+      total += c[type]
+      n++
+    }
+  }
+  if (n === 0) return 0
+  const maxByType =
+    type === 'sugar'
+      ? CFG.SUGAR_MAX
+      : type === 'wood'
+        ? CFG.WOOD_MAX
+        : type === 'metal'
+          ? CFG.METAL_MAX
+          : CFG.ROCK_MAX
+  return Math.min(1, total / (n * maxByType))
 }
 
 export class World {
@@ -84,6 +134,10 @@ export class World {
         rock: 0,
         rockCap: 0,
         path: false,
+        routeType: 'none',
+        trailWear: 0,
+        ticksSinceTraversal: 0,
+        roadTraversals: 0,
         building: null,
       }
     }
@@ -155,12 +209,22 @@ export class World {
 
   regenerate(): void {
     for (const c of this.cells) {
+      decayTrailWear(c)
       if (c.building) continue
       c.sugar = Math.min(c.sugarCap, c.sugar + CFG.SUGAR_REGEN)
       c.wood = Math.min(c.woodCap, c.wood + CFG.WOOD_REGEN)
       c.metal = Math.min(c.metalCap, c.metal + CFG.METAL_REGEN)
       c.rock = Math.min(c.rockCap, c.rock + CFG.ROCK_REGEN)
     }
+  }
+
+  findPath(
+    fromX: number,
+    fromY: number,
+    toX: number,
+    toY: number,
+  ): { x: number; y: number }[] | null {
+    return findPath(this, fromX, fromY, toX, toY)
   }
 
   // Find best cell of 'type' resource within vision.
@@ -171,10 +235,14 @@ export class World {
     type: ResourceType,
     vision: number,
     agentMemory: Map<string, ResourceMemoryEntry> | null = null,
+    carriedAmount = 0,
   ): { x: number; y: number } | null {
+    const remainingCarry = Math.max(0, carryCapFor(type) - carriedAmount)
+    if (remainingCarry <= 0) return null
+
     // 1. Scan vision (real-time perception)
-    let best: { x: number; y: number } | null = null,
-      bestAmt = 0.5
+    let best: { x: number; y: number } | null = null
+    let bestScore = 0.1
     for (let dy = -vision; dy <= vision; dy++) {
       for (let dx = -vision; dx <= vision; dx++) {
         const x = ax + dx,
@@ -183,8 +251,22 @@ export class World {
         const c = this.cell(x, y)
         if (c.building) continue
         const amt = c[type]
-        if (amt > bestAmt) {
-          bestAmt = amt
+        const effectiveYield = Math.min(amt, remainingCarry)
+        if (effectiveYield <= 0.5) continue
+
+        const d = mdist(ax, ay, x, y)
+        const entryCost = traversalCost(c)
+        const density = edgeDensity(this, x, y, type)
+        const edgePenalty =
+          1 + density * Math.max(0, CFG.RESOURCE_TARGET_EDGE_BIAS_WEIGHT)
+        const score =
+          effectiveYield /
+          ((d + 1) *
+            (1 + entryCost * CFG.RESOURCE_TARGET_ENTRY_COST_WEIGHT) *
+            edgePenalty)
+
+        if (score > bestScore) {
+          bestScore = score
           best = { x, y }
         }
       }
@@ -196,10 +278,10 @@ export class World {
     let memBest = null,
       memBestScore = -1
     for (const entry of agentMemory.values()) {
-      const est = entry[type] || 0
+      const est = Math.min(entry[type] || 0, remainingCarry)
       if (est <= 0.5) continue
       const d = mdist(ax, ay, entry.x, entry.y)
-      const score = est / (d + 1) // prefer rich and nearby
+      const score = est / (d + 1) // edge/entry unknown in memory, keep simple
       if (score > memBestScore) {
         memBestScore = score
         memBest = entry
@@ -217,14 +299,19 @@ export class World {
     return this.agents.filter((a) => a.alive && a.x === x && a.y === y)
   }
 
-  move(agent: Agent, x: number, y: number): void {
+  move(agent: Agent, x: number, y: number, opts: MoveOptions = {}): void {
     if (!this.inBounds(x, y)) return
+    const targetCell = this.cell(x, y)
+    if (targetCell.building) return
+
+    const dx = Math.sign(x - agent.x)
+    const dy = Math.sign(y - agent.y)
 
     const ticksPerStep = agent.getTravelTicksPerStep(this)
-    const targetCell = this.cell(x, y)
-    const effectiveTicks = targetCell.path
-      ? Math.max(1, ticksPerStep - 1)
-      : ticksPerStep
+    const effectiveTicks = Math.max(
+      1,
+      Math.round(ticksPerStep * traversalCost(targetCell)),
+    )
     if (effectiveTicks > 1) {
       if (agent.travelTicksUntilMove > 0) {
         agent.travelTicksUntilMove--
@@ -237,6 +324,21 @@ export class World {
 
     agent.x = x
     agent.y = y
+    const wearDelta = CFG.TRAIL_WEAR_PER_STEP * (opts.trailWearMult ?? 1)
+    applyTrailWearOnStep(targetCell, wearDelta)
+
+    // Stone roads allow one additional chained step when continuing along a path.
+    if (getRouteType(targetCell) !== 'stone_road' || (dx === 0 && dy === 0)) {
+      return
+    }
+    const nx = agent.x + dx
+    const ny = agent.y + dy
+    if (!this.inBounds(nx, ny)) return
+    const nextCell = this.cell(nx, ny)
+    if (getRouteType(nextCell) !== 'stone_road' || nextCell.building) return
+    agent.x = nx
+    agent.y = ny
+    applyTrailWearOnStep(nextCell, wearDelta)
   }
 
   spawn(p1: Agent | null = null, p2: Agent | null = null): Agent {

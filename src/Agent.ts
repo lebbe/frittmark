@@ -1,6 +1,7 @@
 import { CFG } from './config'
 import { IDEAS, hasPrereqs } from './ideas'
 import {
+  createBuildRoadNetworkPlan,
   canFormPlanWithKnownIdeas,
   createCookAndStorePlan,
   createHouseUpgradePlan,
@@ -17,7 +18,8 @@ import {
   type AgentPlan,
   type ResourceType,
 } from './planning'
-import { clamp, grantIdea, lerp, pick, rand, randf, stepToward } from './utils'
+import { getNextPathStep } from './paths'
+import { clamp, grantIdea, lerp, pick, rand, randf } from './utils'
 
 type Phase = 'toddler' | 'child' | 'youth' | 'adult'
 type IdeaId = keyof typeof IDEAS
@@ -72,6 +74,10 @@ type CellLike = {
   rock: number
   rockCap: number
   path: boolean
+  routeType: 'none' | 'dirt_path' | 'stone_road'
+  trailWear: number
+  ticksSinceTraversal: number
+  roadTraversals: number
   building: {
     type: 'shelter' | 'house'
     ownerId: number
@@ -88,13 +94,19 @@ interface WorldLike {
   inBounds(x: number, y: number): boolean
   cell(x: number, y: number): CellLike
   agentsNear(x: number, y: number, range: number): Agent[]
-  move(agent: Agent, x: number, y: number): void
+  move(
+    agent: Agent,
+    x: number,
+    y: number,
+    opts?: { trailWearMult?: number },
+  ): void
   findResource(
     x: number,
     y: number,
     type: ResourceType,
     vision: number,
     memory: Map<string, MemoryEntry>,
+    carriedAmount?: number,
   ): { x: number; y: number } | null
 }
 
@@ -651,6 +663,13 @@ export class Agent {
     return true
   }
 
+  _createBuildRoadNetworkPlan(world: WorldLike): boolean {
+    const nextPlan = createBuildRoadNetworkPlan(this, world)
+    if (!nextPlan) return false
+    this.plan = nextPlan
+    return true
+  }
+
   _executePlan(world: WorldLike): boolean {
     if (!this.plan) return false
 
@@ -685,7 +704,7 @@ export class Agent {
           this.plan.steps.shift()
           continue
         }
-        const s = stepToward(this.x, this.y, step.x, step.y)
+        const s = getNextPathStep(world, this.x, this.y, step.x, step.y)
         world.move(this, s.x, s.y)
         this.currentAction = `PLAN:${this.plan.name} -> ${step.label}`
         this.idleTicks = 0
@@ -815,13 +834,14 @@ export class Agent {
         'sugar',
         this.vision,
         this.memory,
+        this.inventory.sugar,
       )
       if (target) {
         if (target.x === this.x && target.y === this.y) {
           IDEAS.HARVEST_SUGAR.exec(this, world)
           this.currentAction = 'HARVEST_SUGAR'
         } else {
-          const s = stepToward(this.x, this.y, target.x, target.y)
+          const s = getNextPathStep(world, this.x, this.y, target.x, target.y)
           world.move(this, s.x, s.y)
           this.currentAction = '-> HARVEST_SUGAR'
         }
@@ -888,6 +908,14 @@ export class Agent {
 
     if (
       !this.plan &&
+      this._createBuildRoadNetworkPlan(world) &&
+      this._executePlan(world)
+    ) {
+      return
+    }
+
+    if (
+      !this.plan &&
       this._createStayIdlePlan(world) &&
       this._executePlan(world)
     ) {
@@ -924,6 +952,7 @@ export class Agent {
             res,
             this.vision,
             this.memory,
+            this.inventory[res],
           )
           if (target && (target.x !== this.x || target.y !== this.y)) {
             this._createNavigateIdeaPlan(bestKey, target)
