@@ -387,23 +387,35 @@ export class Agent {
   }
 
   _syncHousing(world: WorldLike): void {
+    const allAliveAgents = world.agentsNear(
+      this.x,
+      this.y,
+      CFG.GRID_W + CFG.GRID_H,
+    )
+    const adultResidentCount = (
+      building: NonNullable<CellLike['building']>,
+    ): number =>
+      allAliveAgents.filter(
+        (a) => a.phase === 'adult' && building.residents.includes(a.id),
+      ).length
+
     if (this.homeCell) {
       const c = world.cell(this.homeCell.x, this.homeCell.y)
       if (!c.building || !c.building.residents.includes(this.id)) {
+        this.homeCell = null
+      } else if (this.phase === 'adult' && adultResidentCount(c.building) > 2) {
+        c.building.residents = c.building.residents.filter(
+          (id) => id !== this.id,
+        )
         this.homeCell = null
       }
     }
 
     if (this.homeCell && this.becameAdultThisTick) {
       const c = world.cell(this.homeCell.x, this.homeCell.y)
-      const nearbyAll = world.agentsNear(
-        this.homeCell.x,
-        this.homeCell.y,
-        CFG.GRID_W + CFG.GRID_H,
-      )
       const hasOtherLivingAdult = !!(
         c.building &&
-        nearbyAll.some(
+        allAliveAgents.some(
           (a) =>
             a.id !== this.id &&
             a.phase === 'adult' &&
@@ -428,6 +440,9 @@ export class Agent {
         const c = world.cell(x, y)
         if (!c.building || !c.building.complete) continue
         if (c.building.residents.length >= c.building.capacity) continue
+        if (this.phase === 'adult' && adultResidentCount(c.building) >= 2)
+          continue
+        if (c.building.residents.includes(this.id)) continue
         c.building.residents.push(this.id)
         this.homeCell = { x, y }
         return

@@ -1,9 +1,11 @@
 import {
+  closeHouseModal,
   closeModal,
   getCanvasCell,
   initGUI,
   isRunning,
   modInv,
+  openHouseModal,
   openModal,
   pause,
   play,
@@ -78,7 +80,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
       <div class="legend-row"><div class="sw legend-young"></div>Toddler / Child</div>
       <div class="legend-row"><div class="sw legend-shelter"></div>Shelter</div>
       <div class="legend-row"><div class="sw legend-house"></div>House</div>
-      <div class="legend-row legend-note">Pause → click agent to inspect</div>
+      <div class="legend-row legend-note">Pause → click agent or house to inspect</div>
     </div>
   </div>
 </div>
@@ -108,6 +110,20 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <div class="m-sec-title">Ideas <span id="m-idea-count" class="m-idea-count"></span></div>
         <div id="m-ideas"></div>
       </div>
+    </div>
+  </div>
+</div>
+
+<div id="house-modal">
+  <div id="house-modal-box">
+    <div id="house-modal-head">
+      <span id="h-house-title">HOUSE</span>
+      <button id="house-modal-close">✕</button>
+    </div>
+    <div id="house-modal-body">
+      <div class="m-sec"><div class="m-sec-title">Status</div><div class="m-kv-grid" id="h-house-status"></div></div>
+      <div class="m-sec"><div class="m-sec-title">Inventory</div><div id="h-inventory"></div></div>
+      <div class="m-sec"><div class="m-sec-title">Residents (click to inspect)</div><div id="h-residents"></div></div>
     </div>
   </div>
 </div>
@@ -164,18 +180,34 @@ window.addEventListener('DOMContentLoaded', () => {
 
   const modalClose = document.getElementById('modal-close')
   const modal = document.getElementById('modal')
-  if (!modalClose || !modal) throw new Error('Missing modal elements')
+  const houseModalClose = document.getElementById('house-modal-close')
+  const houseModal = document.getElementById('house-modal')
+  if (!modalClose || !modal || !houseModalClose || !houseModal) {
+    throw new Error('Missing modal elements')
+  }
   modalClose.addEventListener('click', closeModal)
   modal.addEventListener('click', (e) => {
     if (e.target === modal) closeModal()
+  })
+  houseModalClose.addEventListener('click', closeHouseModal)
+  houseModal.addEventListener('click', (e) => {
+    if (e.target === houseModal) closeHouseModal()
   })
 
   canvas.addEventListener('click', (e) => {
     if (isRunning()) return
     const { x, y } = getCanvasCell(canvas, e)
     if (!sim.world.inBounds(x, y)) return
+    const cell = sim.world.cell(x, y)
+    if (cell.building) {
+      openHouseModal(x, y)
+      return
+    }
+
     const here = sim.world.agentsAt(x, y)
-    if (here.length > 0) openModal(here[0])
+    if (here.length > 0) {
+      openModal(here[0])
+    }
   })
 
   canvas.addEventListener('mousemove', (e) => {
@@ -221,8 +253,9 @@ window.addEventListener('DOMContentLoaded', () => {
       return
     }
 
-    canvas.style.cursor =
-      sim.world.agentsAt(x, y).length > 0 ? 'pointer' : 'crosshair'
+    const hasBuilding = Boolean(sim.world.cell(x, y).building)
+    const hasAgent = sim.world.agentsAt(x, y).length > 0
+    canvas.style.cursor = hasBuilding || hasAgent ? 'pointer' : 'crosshair'
   })
 
   play()

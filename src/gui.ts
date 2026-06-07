@@ -11,6 +11,7 @@ let running = false
 let tickMs = CFG.DEFAULT_TICK_MS
 let loop: ReturnType<typeof setTimeout> | null = null
 let modalAgent: Agent | null = null
+let modalHouse: { x: number; y: number } | null = null
 
 function mustEl<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id)
@@ -69,6 +70,7 @@ export function step(): void {
   pause()
   sim.step()
   renderer.draw()
+  if (modalHouse) renderHouseModal()
   if (modalAgent) renderModal()
   updateUI()
 }
@@ -153,11 +155,26 @@ export function openModal(agent: Agent): void {
   mustEl('modal').style.display = 'flex'
 }
 
+export function openHouseModal(x: number, y: number): void {
+  modalHouse = { x, y }
+  renderHouseModal()
+  mustEl('house-modal').style.display = 'flex'
+}
+
 export function closeModal(): void {
   const { renderer } = ensureState()
   modalAgent = null
   mustEl('modal').style.display = 'none'
   renderer.draw()
+  if (modalHouse) renderHouseModal()
+}
+
+export function closeHouseModal(): void {
+  const { renderer } = ensureState()
+  modalHouse = null
+  mustEl('house-modal').style.display = 'none'
+  renderer.draw()
+  if (modalAgent) renderModal()
 }
 
 function renderModal(): void {
@@ -244,6 +261,70 @@ function renderModal(): void {
 
   renderer.draw()
   if (a.alive) renderer.highlightCell(a.x, a.y)
+}
+
+function renderHouseModal(): void {
+  const { sim, renderer } = ensureState()
+  if (!modalHouse) return
+  const { x, y } = modalHouse
+
+  if (!sim.world.inBounds(x, y)) {
+    closeHouseModal()
+    return
+  }
+
+  const cell = sim.world.cell(x, y)
+  const building = cell.building
+  if (!building) {
+    closeHouseModal()
+    return
+  }
+
+  const title = `${building.type.toUpperCase()} @ (${x}, ${y})`
+  mustEl('h-house-title').textContent = title
+
+  mustEl('h-house-status').innerHTML = `
+    <span class="m-k">Type</span>         <span class="m-v">${building.type}</span>
+    <span class="m-k">Owner</span>        <span class="m-v">#${building.ownerId}</span>
+    <span class="m-k">Progress</span>     <span class="m-v">${building.progress}/${building.progressMax}</span>
+    <span class="m-k">Complete</span>     <span class="m-v">${building.complete ? 'yes' : 'no'}</span>
+    <span class="m-k">Residents</span>    <span class="m-v">${building.residents.length}/${building.capacity}</span>
+  `
+
+  mustEl('h-inventory').innerHTML = `
+    <div class="inv-row"><span class="inv-key">Sugar</span><span class="inv-val">${Math.floor(building.inv.sugar)}</span></div>
+    <div class="inv-row"><span class="inv-key">Wood</span><span class="inv-val">${Math.floor(building.inv.wood)}</span></div>
+    <div class="inv-row"><span class="inv-key">Metal</span><span class="inv-val">${Math.floor(building.inv.metal)}</span></div>
+    <div class="inv-row"><span class="inv-key">Cooked food</span><span class="inv-val">${Math.floor(building.inv.cooked)}</span></div>
+  `
+
+  const residentsHost = mustEl('h-residents')
+  if (building.residents.length === 0) {
+    residentsHost.innerHTML = '<div class="m-v">No residents.</div>'
+  } else {
+    residentsHost.innerHTML = building.residents
+      .map((id) => {
+        const resident = sim.world.agents.find((a) => a.id === id)
+        if (!resident) {
+          return `<button class="resident-btn" disabled>Agent #${id} (missing)</button>`
+        }
+        return `<button class="resident-btn" data-agent-id="${resident.id}">Agent #${resident.id} (${resident.phase})</button>`
+      })
+      .join('')
+
+    residentsHost.querySelectorAll<HTMLButtonElement>('.resident-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const idText = btn.dataset.agentId
+        if (!idText) return
+        const resident = sim.world.agents.find((a) => a.id === Number(idText))
+        if (!resident) return
+        openModal(resident)
+      })
+    })
+  }
+
+  renderer.draw()
+  renderer.highlightCell(x, y)
 }
 
 export function barRow(key: string, val: number, colorClass: string): string {
