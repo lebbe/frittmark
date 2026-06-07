@@ -170,9 +170,10 @@ function renderModal(): void {
   pb.textContent = a.phase
   pb.className = `m-phase-badge phase-${a.phase}`
 
-  const navStr = a.navTarget
-    ? `→ (${a.navTarget.x},${a.navTarget.y}) for ${a.navIdea}`
-    : a.currentAction
+  const actionStr = a.currentAction
+  const planStepsStr = a.plan
+    ? a.plan.steps.map((step) => step.label).join(' -> ')
+    : 'none'
   const homeStr = a.homeCell ? `(${a.homeCell.x},${a.homeCell.y})` : 'none'
 
   mustEl('m-status').innerHTML = `
@@ -185,7 +186,8 @@ function renderModal(): void {
     <span class="m-k">Wealth</span>       <span class="m-v">${totalWealth(a).toFixed(1)}</span>
     <span class="m-k">Memory</span>       <span class="m-v">${a.memory.size} cells</span>
     <span class="m-k">Idle ticks</span>   <span class="m-v">${a.idleTicks}</span>
-    <span class="m-k">Action</span>       <span class="m-v nav-indicator">${navStr}</span>
+    <span class="m-k">Action</span>       <span class="m-v nav-indicator">${actionStr}</span>
+    <span class="m-k">Plan</span>         <span class="m-v nav-indicator">${planStepsStr}</span>
   `
 
   mustEl('m-values').innerHTML = Object.entries(a.values)

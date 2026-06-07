@@ -15,7 +15,7 @@ export const CFG = {
   METAL_REGEN: 0.025,
 
   INITIAL_AGENTS: 80,
-  POP_CAP: 400,
+  POP_CAP: 4000,
   HUNGER_PER_TICK: 0.035,
   HUNGER_DEATH: 1.0,
   MAX_AGE: 700,
@@ -27,6 +27,14 @@ export const CFG = {
 
   SUGAR_EAT_RESTORE: 0.35,
   COOKED_EAT_RESTORE: 0.8,
+  SHELTER_EAT_BONUS: 1.25,
+  CARRIED_SUGAR_SPOIL_CHANCE: 0.03,
+  CARRIED_COOKED_SPOIL_CHANCE: 0.04,
+  SHELTER_CARRIED_SPOIL_MULT: 0.45,
+  STORED_SUGAR_SPOIL_CHANCE: 0.01,
+  STORED_COOKED_SPOIL_CHANCE: 0.015,
+  METAL_CARRY_CAP: 1.5,
+  HUNGER_NOFOOD_FORAGE: 0.72,
   COOK_SUGAR: 2,
   COOK_WOOD: 1,
 
@@ -52,15 +60,18 @@ export const CFG = {
   AGE_CHILD: 60,
   AGE_YOUTH: 120,
 
-  IDLE_THRESHOLD: 5,
-  DISCOVER_CHANCE: 0.05,
+  IDLE_THRESHOLD: 1,
+  DISCOVER_CHANCE: 0.08,
   SPREAD_CHANCE: 0.03,
   MEM_SHARE_CHANCE: 0.12, // chance per tick to share memory with nearby agent
   MEM_CAP: 200, // max memory entries per agent
 
   TRADE_RANGE: 2,
-  DEFAULT_TICK_MS: 1000,
+  DEFAULT_TICK_MS: 1,
 
-  // Navigation: abandon navTarget if critically hungry and can eat
-  HUNGER_ABANDON_NAV: 0.85,
+  // Plan behavior under hunger
+  HUNGER_PAUSE_PLAN: 0.6,
+  HUNGER_ABORT_PLAN_NOFOOD: 0.72,
+  // Low-integrity agents may occasionally drop a plan and re-score ideas.
+  PLAN_RECONSIDER_MAX_CHANCE: 0.08,
 }

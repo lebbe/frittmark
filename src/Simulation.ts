@@ -23,7 +23,36 @@ export class Simulation {
   step() {
     this.tickN++
     const w = this.world
+    const nearCompletedShelter = (a: (typeof w.agents)[number]) => {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const x = a.x + dx
+          const y = a.y + dy
+          if (!w.inBounds(x, y)) continue
+          const c = w.cell(x, y)
+          if (c.building && c.building.complete && c.building.type === 'shelter') {
+            return true
+          }
+        }
+      }
+      return false
+    }
     w.regenerate()
+    for (const c of w.cells) {
+      if (!c.building || !c.building.complete || !c.building.inv) continue
+      if (
+        c.building.inv.sugar > 0 &&
+        Math.random() < CFG.STORED_SUGAR_SPOIL_CHANCE
+      ) {
+        c.building.inv.sugar--
+      }
+      if (
+        c.building.inv.cooked > 0 &&
+        Math.random() < CFG.STORED_COOKED_SPOIL_CHANCE
+      ) {
+        c.building.inv.cooked--
+      }
+    }
     for (const a of w.agents) a.tick(w)
 
     // Reap dead
@@ -45,7 +74,8 @@ export class Simulation {
         (a) =>
           a.phase === 'adult' &&
           a.reproCooldown === 0 &&
-          a.inventory.sugar >= CFG.REPRO_MIN_SUGAR,
+          a.inventory.sugar >= CFG.REPRO_MIN_SUGAR &&
+          nearCompletedShelter(a),
       )
       for (const a of eligible) {
         if (a.reproCooldown > 0) continue
@@ -56,7 +86,8 @@ export class Simulation {
               b !== a &&
               b.phase === 'adult' &&
               b.reproCooldown === 0 &&
-              b.inventory.sugar >= CFG.REPRO_MIN_SUGAR,
+              b.inventory.sugar >= CFG.REPRO_MIN_SUGAR &&
+                nearCompletedShelter(b),
           )
         if (p) {
           w.spawn(a, p)

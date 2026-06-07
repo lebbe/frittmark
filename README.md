@@ -4,7 +4,7 @@
 
 Frittmark is a browser-based agent simulation that explores how voluntary exchange, capital accumulation, specialisation, and spontaneous order emerge from the bottom up — without central planning. It is a deliberate philosophical counterpoint to Sugarscape, the classic zero-sum resource simulation by Epstein and Axtell (1996).
 
-All simulation logic, rendering, and UI is contained in a single self-sufficient HTML file. No build step, no framework, no dependencies.
+The simulation is implemented as a modular TypeScript project (`src/*`) and runs in the browser via Vite.
 
 ---
 
@@ -72,7 +72,7 @@ All magic numbers live in a single `CFG` object so they can be found and changed
 | `WOOD_REGEN`         | `0.08`  | Wood regenerated per tick per cell                         |
 | `METAL_REGEN`        | `0.025` | Metal regenerated per tick per cell                        |
 | `INITIAL_AGENTS`     | `80`    | Agents spawned at simulation start                         |
-| `POP_CAP`            | `400`   | Soft population ceiling; no reproduction above this        |
+| `POP_CAP`            | `4000`  | Soft population ceiling; no reproduction above this        |
 | `HUNGER_PER_TICK`    | `0.035` | Base hunger increase per tick (scaled by metabolism)       |
 | `HUNGER_DEATH`       | `1.0`   | Hunger level at which agent dies                           |
 | `MAX_AGE`            | `700`   | Maximum lifespan in ticks                                  |
@@ -80,6 +80,14 @@ All magic numbers live in a single `CFG` object so they can be found and changed
 | `METABOLISM_MIN/MAX` | `1 / 4` | Heritable trait range (hunger multiplier)                  |
 | `SUGAR_EAT_RESTORE`  | `0.35`  | Hunger reduction from eating 1 raw sugar                   |
 | `COOKED_EAT_RESTORE` | `0.80`  | Hunger reduction from eating 1 cooked food                 |
+| `SHELTER_EAT_BONUS`  | `1.25`  | Extra hunger restoration multiplier when eating near shelter |
+| `CARRIED_SUGAR_SPOIL_CHANCE` | `0.03` | Per-tick spoilage chance for carried sugar             |
+| `CARRIED_COOKED_SPOIL_CHANCE` | `0.04` | Per-tick spoilage chance for carried cooked food      |
+| `SHELTER_CARRIED_SPOIL_MULT` | `0.45` | Carried-food spoilage multiplier for agents with completed home |
+| `STORED_SUGAR_SPOIL_CHANCE` | `0.01` | Per-tick spoilage chance for stored sugar               |
+| `STORED_COOKED_SPOIL_CHANCE` | `0.015` | Per-tick spoilage chance for stored cooked food       |
+| `METAL_CARRY_CAP` | `1.5` | Maximum carried metal per agent                                    |
+| `HUNGER_NOFOOD_FORAGE` | `0.72` | Hunger threshold for emergency sugar-forage when inventory is empty |
 | `COOK_SUGAR`         | `2`     | Sugar cost to cook one batch                               |
 | `COOK_WOOD`          | `1`     | Wood cost to cook one batch                                |
 | `AXE_DUR`            | `50`    | Axe uses before breaking                                   |
@@ -101,8 +109,8 @@ All magic numbers live in a single `CFG` object so they can be found and changed
 | `AGE_TODDLER`        | `20`    | Ticks in toddler phase                                     |
 | `AGE_CHILD`          | `60`    | Ticks in child phase                                       |
 | `AGE_YOUTH`          | `120`   | Ticks in youth phase                                       |
-| `IDLE_THRESHOLD`     | `5`     | Consecutive idle ticks before idea discovery can trigger   |
-| `DISCOVER_CHANCE`    | `0.05`  | Base probability of discovering a new idea per idle check  |
+| `IDLE_THRESHOLD`     | `1`     | Consecutive idle ticks before idea discovery can trigger   |
+| `DISCOVER_CHANCE`    | `0.08`  | Base probability of discovering a new idea per idle check  |
 | `SPREAD_CHANCE`      | `0.03`  | Base probability of learning an idea from a nearby agent   |
 | `MEM_SHARE_CHANCE`   | `0.12`  | Per-tick probability of sharing memory with a nearby agent |
 | `MEM_CAP`            | `200`   | Maximum memory entries per agent                           |
@@ -117,15 +125,15 @@ All magic numbers live in a single `CFG` object so they can be found and changed
 Stateless helper functions used throughout:
 
 ```javascript
-rand(a, b); // inclusive integer random
-randf(a, b); // float random
-clamp(v, a, b); // value clamped to [a, b]
-pick(arr); // random array element
-lerp(a, b, t); // linear interpolation
-mdist(x1, y1, x2, y2); // Manhattan distance
-stepToward(x, y, tx, ty); // one-cell step in the direction of (tx, ty)
-totalWealth(agent); // weighted inventory sum for Gini calculation
-grantIdea(agent, id); // centralised idea granting with auto-chaining
+rand(a, b) // inclusive integer random
+randf(a, b) // float random
+clamp(v, a, b) // value clamped to [a, b]
+pick(arr) // random array element
+lerp(a, b, t) // linear interpolation
+mdist(x1, y1, x2, y2) // Manhattan distance
+stepToward(x, y, tx, ty) // one-cell step in the direction of (tx, ty)
+totalWealth(agent) // weighted inventory sum for Gini calculation
+grantIdea(agent, id) // centralised idea granting with auto-chaining
 ```
 
 `totalWealth` computes a weighted sum of all inventory contents for use in Gini coefficient calculation. The weights reflect relative utility: sugar = 1, wood = 2, metal = 5, cooked food = 1.5, each tool = 4 (regardless of remaining durability).
@@ -203,7 +211,7 @@ Each tick, a non-toddler agent scores every idea in its current `ideas` Set. Ide
 
 **Tier 1 — Craft.** Discoverable when idle without a house. Require prerequisites. These represent learned productive skills: cooking, tool-making, trading. Discovery probability scales with `curiosity`.
 
-**Tier 2 — Abstract.** Discoverable only when idle inside a completed house. Represent complex social and economic concepts that require stable shelter and reflective time to develop. Currently: `BUILD_HOUSE`.
+**Tier 2 — Abstract.** Discoverable when idle while assigned to a completed shelter or house. These represent complex social and economic concepts that require stable living conditions. Currently: `BUILD_HOUSE`.
 
 ### Idea Catalogue
 
@@ -221,11 +229,24 @@ Each tick, a non-toddler agent scores every idea in its current `ideas` Set. Ide
 | `MAKE_SPADE`    | 1    | CHOP_WOOD, DIG_METAL | Craft a spade (50 uses) from 2 wood + 1 metal                                              |
 | `MAKE_PICKAXE`  | 1    | CHOP_WOOD, DIG_METAL | Craft a pickaxe (50 uses) from 2 wood + 1 metal                                            |
 | `TRADE`         | 1    | COOK_FOOD            | Attempt bilateral voluntary exchange with a nearby agent; also shares full location memory |
-| `BUILD_HOUSE`   | 2    | BUILD_SHELTER        | Collaborative construction (requires partner); 5-capacity, 8 wood total                    |
+| `BUILD_HOUSE`   | 2    | BUILD_SHELTER        | Collaborative construction (requires partner) on wood/empty terrain only; sugar/metal cells are invalid even when depleted; 5-capacity, 8 wood total |
 
 ### `BUILD_SHELTER` as Tier 0
 
 Building a basic shelter — piling logs for cover — is classified as instinctive knowledge (Tier 0) rather than a discovered skill. The reasoning: primitive shelter from available materials requires no conceptual breakthrough; it is a direct response to environmental exposure. The idea's `exec` function doubles as both a wood-gatherer and a builder: if the agent's inventory is below threshold, it navigates to wood and chops; once enough wood is accumulated, it builds on the current cell.
+
+### Minimal Behavior Balancing (June 2026)
+
+Recent balancing changes were intentionally minimal and targeted:
+
+- **Reproduction is now shelter-gated.** Agents can reproduce only when they are adults with sugar and cooldown eligibility, and each is in or next to a completed shelter.
+- **Sugar harvesting now includes satiety damping.** `HARVEST_SUGAR` score is multiplied by a clamp-based satiety factor, reducing sugar over-focus when inventory is already stocked.
+- **Wood/metal gathering now use soft hunger penalties.** `CHOP_WOOD` and `DIG_METAL` no longer hard-stop at hunger thresholds; instead, score scales down smoothly with hunger.
+- **Metal hoarding is capped.** Agents stop digging metal once carried metal reaches `METAL_CARRY_CAP`.
+- **Emergency no-food behavior is active.** At high hunger with no carried sugar/cooked food, agents override normal planning and forage sugar immediately.
+- **House terrain is constrained.** `BUILD_HOUSE` cannot execute on sugar or metal terrain, including depleted sugar/metal cells; valid plots are wood or empty cells.
+- **A small exploration/build nudge is applied.** Non-desperate agents with sugar reserves get a modest multiplier on building/non-food craft scores, encouraging progression out of sugar-only loops.
+- **Shelter economy is active.** Agents auto-join nearby shelters when single, can deposit/withdraw shared shelter inventory, and run stockpile plans that gather sugar/wood/metal for home stores. Carried food spoils faster than stored food, eating while sheltered gives a comfort bonus, and agents with completed home assignment get slower carried-food spoilage than unsheltered agents.
 
 ### The `EAT_COOKED` Auto-grant
 
@@ -373,7 +394,7 @@ Each tick, after hunger update, a non-toddler agent executes:
 
 **Discovery roll:** `random < DISCOVER_CHANCE × (1 + curiosity × 2.5)`
 
-If successful, the agent picks a random idea from the eligible pool (Tier 1 ideas if not in a house; Tier 1 + Tier 2 ideas if inside a completed house) for which all prerequisites are met and which the agent does not yet know. The idea is granted via `grantIdea`.
+If successful, the agent picks a random idea from the eligible pool (Tier 1 ideas when unsheltered; Tier 1 + Tier 2 ideas when assigned to a completed shelter/house) for which all prerequisites are met and which the agent does not yet know. The idea is granted via `grantIdea`.
 
 **Spread roll:** `random < SPREAD_CHANCE × (1 + curiosity × 2.5)`
 
@@ -383,7 +404,14 @@ Both rolls reset `idleTicks` to 0 on success.
 
 ### Reproduction
 
-Two adults within Manhattan distance 1, both with at least `REPRO_MIN_SUGAR` sugar and `reproCooldown = 0`, produce one child. The child is spawned at the parents' location with:
+Two adults within Manhattan distance 1 can reproduce only when all of the following are true:
+
+- Both are in `adult` phase
+- Both have `reproCooldown = 0`
+- Both hold at least `REPRO_MIN_SUGAR` sugar
+- Both are in or adjacent to a completed shelter cell
+
+When eligible partners meet, one child is spawned at the parents' location with:
 
 - Physical traits: midpoint of parents' values with mutation
 - Values: midpoint with ±0.12 noise
@@ -511,28 +539,28 @@ The `IDEAS` object is the only place that needs to change. Add an entry:
 ```javascript
 IDEAS.DISTILL_SPIRIT = {
   tier: 2, // requires a house to discover
-  requires: ["COOK_FOOD", "DIG_METAL"], // prerequisites
+  requires: ['COOK_FOOD', 'DIG_METAL'], // prerequisites
   needsRes: null, // no navigation needed to execute
   score(a, w) {
     // Only interesting if agent has surplus sugar and wood
-    if (a.inventory.sugar < 5) return 0;
-    if (a.inventory.wood < 2) return 0;
+    if (a.inventory.sugar < 5) return 0
+    if (a.inventory.wood < 2) return 0
     // Highly social agents produce more; patience scales long-term interest
-    return a.values.social * a.morals.patience * 4;
+    return a.values.social * a.morals.patience * 4
   },
   canDo(a, w) {
     return (
       a.inventory.sugar >= 5 && a.inventory.wood >= 2 && a.inventory.metal >= 1
-    );
+    )
   },
   exec(a, w) {
-    a.inventory.sugar -= 5;
-    a.inventory.wood -= 2;
-    a.inventory.metal -= 1;
-    a.inventory.spirit = (a.inventory.spirit || 0) + 3; // new inventory type
-    return true;
+    a.inventory.sugar -= 5
+    a.inventory.wood -= 2
+    a.inventory.metal -= 1
+    a.inventory.spirit = (a.inventory.spirit || 0) + 3 // new inventory type
+    return true
   },
-};
+}
 ```
 
 The new idea will automatically:
@@ -557,7 +585,7 @@ This field tells the navigation planner what resource to seek when `canDo` retur
 
 **Memory never expires (only updates).** An agent heading for a wood patch that was depleted last tick will find it empty and update their memory correctly — but they wasted travel time. A time-weighted confidence score on memory entries would improve navigation efficiency but adds complexity.
 
-**No spoilage yet.** Cooked food does not spoil. In design, cooked food stored in a house should last longer than in a shelter, and raw sugar should spoil fastest. This creates real value for built infrastructure. Partially implemented in the design spec; not yet in code.
+**Simplified spoilage is implemented.** Carried sugar/cooked food can spoil per tick, and stored food in completed buildings spoils at lower rates. This already creates value for shelter storage, but rates are still globally tuned and not yet differentiated by shelter vs house quality.
 
 **Youth rebellion is not implemented.** The design calls for youth-phase agents to probabilistically try ideas opposite to their inherited ones, strengthening inherited ideas on failure and potentially replacing them on success. This would produce genuine cultural evolution across generations. Currently, youth agents behave identically to adults.
 
@@ -571,8 +599,6 @@ This field tells the navigation planner what resource to seek when `canDo` retur
 
 **Phase 2:**
 
-- Food spoilage rates depending on storage location (none / shelter / house)
-- Agents physically returning home to deposit goods in building inventory
 - Youth rebellion mechanic: heritable idea mutation
 - A Gini-over-time chart in the sidebar
 
@@ -592,7 +618,19 @@ This field tells the navigation planner what resource to seek when `canDo` retur
 
 ## Running the Simulation
 
-Open `frittmark.html` in any modern browser. No server is required.
+Install and run with Vite:
+
+```bash
+npm install
+npm run dev
+```
+
+For a production build:
+
+```bash
+npm run build
+npm run preview
+```
 
 The simulation starts automatically. Recommended workflow for first observation:
 

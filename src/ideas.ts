@@ -52,8 +52,11 @@ type IdeaAgent = {
 
 type IdeaCell = {
   sugar: number
+  sugarCap: number
   wood: number
+  woodCap: number
   metal: number
+  metalCap: number
   building: {
     type: 'shelter' | 'house'
     ownerId: number
@@ -67,6 +70,7 @@ type IdeaCell = {
 }
 
 type IdeaWorld = {
+  inBounds(x: number, y: number): boolean
   findResource(
     x: number,
     y: number,
@@ -88,6 +92,27 @@ type IdeaDef = {
   exec(a: IdeaAgent, w: IdeaWorld): boolean
 }
 
+function isHousePlotAllowed(c: IdeaCell): boolean {
+  // Houses are forbidden on any sugar/metal terrain, even if currently depleted.
+  // Valid plots are wood-bearing or fully empty cells without sugar/metal traces.
+  return c.sugarCap === 0 && c.metalCap === 0 && c.sugar <= 0 && c.metal <= 0
+}
+
+function isSheltered(a: IdeaAgent, w: IdeaWorld): boolean {
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const x = a.x + dx
+      const y = a.y + dy
+      if (!w.inBounds(x, y)) continue
+      const c = w.cell(x, y)
+      if (c.building && c.building.complete && c.building.type === 'shelter') {
+        return true
+      }
+    }
+  }
+  return false
+}
+
 export const IDEAS: Record<string, IdeaDef> = {
   // ---- TIER 0: Instinct — all agents start with these ----
 
@@ -105,7 +130,10 @@ export const IDEAS: Record<string, IdeaDef> = {
     },
     exec(a, _w) {
       a.inventory.sugar--
-      a.needs.hunger = clamp(a.needs.hunger - CFG.SUGAR_EAT_RESTORE, 0, 1)
+      const restore = isSheltered(a, _w)
+        ? CFG.SUGAR_EAT_RESTORE * CFG.SHELTER_EAT_BONUS
+        : CFG.SUGAR_EAT_RESTORE
+      a.needs.hunger = clamp(a.needs.hunger - restore, 0, 1)
       return true
     },
   },
@@ -115,8 +143,9 @@ export const IDEAS: Record<string, IdeaDef> = {
     requires: [],
     needsRes: 'sugar',
     score(a, w) {
+      const satiety = clamp(1.2 - a.inventory.sugar / 10, 0.25, 1.2)
       return w.findResource(a.x, a.y, 'sugar', a.vision, a.memory)
-        ? a.values.survival * (1 + a.needs.hunger) * 4
+        ? a.values.survival * (1 + a.needs.hunger) * 4 * satiety
         : 0
     },
     canDo(a, w) {
@@ -144,9 +173,9 @@ export const IDEAS: Record<string, IdeaDef> = {
     requires: [],
     needsRes: 'wood',
     score(a, w) {
-      if (a.needs.hunger > 0.7) return 0
+      const hungerPenalty = clamp(1 - a.needs.hunger * 0.75, 0.2, 1)
       return w.findResource(a.x, a.y, 'wood', a.vision, a.memory)
-        ? a.values.building * 2.5
+        ? a.values.building * 2.5 * hungerPenalty
         : 0
     },
     canDo(a, w) {
@@ -174,12 +203,14 @@ export const IDEAS: Record<string, IdeaDef> = {
     requires: [],
     needsRes: 'metal',
     score(a, w) {
-      if (a.needs.hunger > 0.6) return 0
+      if (a.inventory.metal >= CFG.METAL_CARRY_CAP) return 0
+      const hungerPenalty = clamp(1 - a.needs.hunger * 0.75, 0.2, 1)
       return w.findResource(a.x, a.y, 'metal', a.vision, a.memory)
-        ? a.values.metal * 3.5
+        ? a.values.metal * 3.5 * hungerPenalty
         : 0
     },
     canDo(a, w) {
+      if (a.inventory.metal >= CFG.METAL_CARRY_CAP) return false
       return !!w.findResource(a.x, a.y, 'metal', a.vision, a.memory)
     },
     exec(a, w) {
@@ -190,7 +221,13 @@ export const IDEAS: Record<string, IdeaDef> = {
       if (a.x === t.x && a.y === t.y) {
         const c = w.cell(a.x, a.y)
         const bonus = a.inventory.pick > 0 ? CFG.PICK_BONUS : 1
-        const got = Math.min(Math.floor(c.metal), Math.ceil(0.8 * bonus))
+        const remainCap = Math.max(0, CFG.METAL_CARRY_CAP - a.inventory.metal)
+        if (remainCap <= 0) return false
+        const got = Math.min(
+          Math.floor(c.metal),
+          Math.ceil(0.8 * bonus),
+          remainCap,
+        )
         c.metal = Math.max(0, c.metal - got)
         a.inventory.metal += got
         if (a.inventory.pick > 0) a.inventory.pick--
@@ -206,15 +243,24 @@ export const IDEAS: Record<string, IdeaDef> = {
     needsRes: 'wood',
     score(a, w) {
       if (a.homeCell) return 0
+      const exploreBonus =
+        a.inventory.sugar >= CFG.REPRO_MIN_SUGAR && a.needs.hunger < 0.65
+          ? 1.15
+          : 1
       if (a.inventory.wood < CFG.SHELTER_WOOD) {
         // Not enough wood yet — score based on how badly we want a home,
         // filtered by: do we know where wood is?
         const woodTarget = w.findResource(a.x, a.y, 'wood', a.vision, a.memory)
         return woodTarget
-          ? a.values.building * 4 * (0.5 + a.morals.patience * 0.5)
+          ? a.values.building *
+              4 *
+              (0.5 + a.morals.patience * 0.5) *
+              exploreBonus
           : 0
       }
-      return a.values.building * 6 * (0.5 + a.morals.patience * 0.5)
+      return (
+        a.values.building * 6 * (0.5 + a.morals.patience * 0.5) * exploreBonus
+      )
     },
     canDo(a, w) {
       return (
@@ -311,7 +357,10 @@ export const IDEAS: Record<string, IdeaDef> = {
     },
     exec(a, _w) {
       a.inventory.cooked--
-      a.needs.hunger = clamp(a.needs.hunger - CFG.COOKED_EAT_RESTORE, 0, 1)
+      const restore = isSheltered(a, _w)
+        ? CFG.COOKED_EAT_RESTORE * CFG.SHELTER_EAT_BONUS
+        : CFG.COOKED_EAT_RESTORE
+      a.needs.hunger = clamp(a.needs.hunger - restore, 0, 1)
       return true
     },
   },
@@ -327,7 +376,11 @@ export const IDEAS: Record<string, IdeaDef> = {
         a.inventory.metal < CFG.TOOL_METAL
       )
         return 0
-      return a.values.building * 4
+      const exploreBonus =
+        a.inventory.sugar >= CFG.REPRO_MIN_SUGAR && a.needs.hunger < 0.65
+          ? 1.15
+          : 1
+      return a.values.building * 4 * exploreBonus
     },
     canDo(a, _w) {
       return (
@@ -355,7 +408,11 @@ export const IDEAS: Record<string, IdeaDef> = {
         a.inventory.metal < CFG.TOOL_METAL
       )
         return 0
-      return a.values.survival * 3
+      const exploreBonus =
+        a.inventory.sugar >= CFG.REPRO_MIN_SUGAR && a.needs.hunger < 0.65
+          ? 1.15
+          : 1
+      return a.values.survival * 3 * exploreBonus
     },
     canDo(a, _w) {
       return (
@@ -383,7 +440,11 @@ export const IDEAS: Record<string, IdeaDef> = {
         a.inventory.metal < CFG.TOOL_METAL
       )
         return 0
-      return a.values.metal * 4
+      const exploreBonus =
+        a.inventory.sugar >= CFG.REPRO_MIN_SUGAR && a.needs.hunger < 0.65
+          ? 1.15
+          : 1
+      return a.values.metal * 4 * exploreBonus
     },
     canDo(a, _w) {
       return (
@@ -436,6 +497,7 @@ export const IDEAS: Record<string, IdeaDef> = {
     needsRes: 'wood',
     score(a, w) {
       if (a.homeCell || a.inventory.wood < CFG.HOUSE_WOOD) return 0
+      if (!isHousePlotAllowed(w.cell(a.x, a.y))) return 0
       const partner = w
         .agentsNear(a.x, a.y, 1)
         .find((b) => b.id !== a.id && b.ideas.has('BUILD_HOUSE') && !b.homeCell)
@@ -444,6 +506,7 @@ export const IDEAS: Record<string, IdeaDef> = {
     canDo(a, w) {
       if (a.homeCell || a.inventory.wood < CFG.HOUSE_WOOD) return false
       if (w.cell(a.x, a.y).building) return false
+      if (!isHousePlotAllowed(w.cell(a.x, a.y))) return false
       return w
         .agentsNear(a.x, a.y, 1)
         .some((b) => b.id !== a.id && b.ideas.has('BUILD_HOUSE') && !b.homeCell)
@@ -453,6 +516,7 @@ export const IDEAS: Record<string, IdeaDef> = {
         .agentsNear(a.x, a.y, 1)
         .find((b) => b.id !== a.id && b.ideas.has('BUILD_HOUSE') && !b.homeCell)
       if (!p || w.cell(a.x, a.y).building) return false
+      if (!isHousePlotAllowed(w.cell(a.x, a.y))) return false
       const half = Math.floor(CFG.HOUSE_WOOD / 2),
         rest = CFG.HOUSE_WOOD - half
       if (a.inventory.wood < half || p.inventory.wood < rest) return false

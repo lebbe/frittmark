@@ -18,6 +18,7 @@ type AgentMorals = {
   patience: number
   curiosity: number
   respectProperty: number
+  integrity: number
 }
 
 type AgentInventory = {
@@ -43,9 +44,22 @@ type HomeCell = {
   y: number
 }
 
-type NavTarget = {
-  x: number
-  y: number
+type PlanStep =
+  | { kind: 'MOVE_TO'; label: string; x: number; y: number }
+  | { kind: 'EXEC_IDEA'; label: string; ideaId: IdeaId }
+  | {
+      kind: 'GATHER_UNTIL'
+      label: string
+      ideaId: IdeaId
+      resource: ResourceType
+      targetTotal: number
+      includeHomeInventory: boolean
+    }
+  | { kind: 'DEPOSIT_HOME'; label: string }
+
+type AgentPlan = {
+  name: 'NAVIGATE_IDEA' | 'SHELTER_STOCKPILE'
+  steps: PlanStep[]
 }
 
 type CellLike = {
@@ -63,6 +77,7 @@ type CellLike = {
     progressMax: number
     complete: boolean
     capacity: number
+    inv?: { sugar: number; wood: number; metal: number; cooked: number }
   } | null
 }
 
@@ -102,10 +117,10 @@ export class Agent {
   morals: AgentMorals
   inventory: AgentInventory
   memory: Map<string, MemoryEntry>
-  navTarget: NavTarget | null
-  navIdea: IdeaId | null
+  plan: AgentPlan | null
   currentAction: string
   ideas: Set<IdeaId>
+  becameAdultThisTick: boolean
 
   constructor(
     id: number,
@@ -124,7 +139,6 @@ export class Agent {
     this.homeCell = null
     this.phase = p1 || p2 ? 'toddler' : 'adult'
 
-    // Physical traits (heritable with mutation)
     this.vision = p1
       ? clamp(
           Math.round(
@@ -160,20 +174,11 @@ export class Agent {
       pick: 0,
     }
 
-    // ---- Memory: known resource cells ----
-    // key: "x,y"  value: {x, y, sugar, wood, metal}
     this.memory = new Map<string, MemoryEntry>()
-
-    // ---- Navigation commitment ----
-    // When scoring produces a goal whose resource is outside vision,
-    // the agent commits to navigating there over multiple ticks.
-    this.navTarget = null // {x, y}
-    this.navIdea = null // ideaId to execute on arrival
-
-    // For display: what the agent is currently doing
+    this.plan = null
     this.currentAction = 'idle'
+    this.becameAdultThisTick = false
 
-    // Ideas: all tier-0 + inherited from parents
     this.ideas = new Set<IdeaId>(TIER0)
     for (const parent of [p1, p2]) {
       if (!parent) continue
@@ -182,7 +187,6 @@ export class Agent {
       }
     }
 
-    // Inherit a random subset of parents' memory (knowledge passed down)
     for (const parent of [p1, p2]) {
       if (!parent) continue
       for (const [key, entry] of parent.memory) {
@@ -218,6 +222,7 @@ export class Agent {
       patience: [0, 1],
       curiosity: [0, 1],
       respectProperty: [0.4, 1],
+      integrity: [0.4, 1],
     }
     const out = {} as AgentMorals
     for (const k of Object.keys(R) as (keyof AgentMorals)[]) {
@@ -233,19 +238,18 @@ export class Agent {
     return out
   }
 
-  // ----------------------------------------------------------------
-  //  Main tick
-  // ----------------------------------------------------------------
-
   tick(world: WorldLike): void {
     this.age++
     this.reproCooldown = Math.max(0, this.reproCooldown - 1)
+    this.becameAdultThisTick = false
     this._updatePhase()
+    this._syncHousing(world)
     this.needs.hunger = clamp(
       this.needs.hunger + CFG.HUNGER_PER_TICK * (this.metabolism / 2.5),
       0,
       1,
     )
+    this._spoilCarriedFood(world)
 
     if (this.phase === 'toddler') {
       if (this.needs.hunger > 0.5 && this.inventory.sugar > 0) {
@@ -257,6 +261,7 @@ export class Agent {
         )
       }
     } else {
+      this._shelterEconomy(world)
       this._updateMemory(world)
       this._decideAndAct(world)
       this._advanceBuilding(world)
@@ -273,13 +278,414 @@ export class Agent {
       this.phase = 'child'
     if (this.phase === 'child' && this.age >= CFG.AGE_CHILD)
       this.phase = 'youth'
-    if (this.phase === 'youth' && this.age >= CFG.AGE_YOUTH)
+    if (this.phase === 'youth' && this.age >= CFG.AGE_YOUTH) {
       this.phase = 'adult'
+      this.becameAdultThisTick = true
+    }
   }
 
-  // ----------------------------------------------------------------
-  //  Memory: scan vision range and record resource locations
-  // ----------------------------------------------------------------
+  _spoilCarriedFood(world: WorldLike): void {
+    const hasCompletedHome = !!(
+      this.homeCell &&
+      (() => {
+        const c = world.cell(this.homeCell!.x, this.homeCell!.y)
+        return c.building && c.building.complete
+      })()
+    )
+    const spoilMult = hasCompletedHome ? CFG.SHELTER_CARRIED_SPOIL_MULT : 1
+    if (
+      this.inventory.sugar > 0 &&
+      Math.random() < CFG.CARRIED_SUGAR_SPOIL_CHANCE * spoilMult
+    ) {
+      this.inventory.sugar--
+    }
+    if (
+      this.inventory.cooked > 0 &&
+      Math.random() < CFG.CARRIED_COOKED_SPOIL_CHANCE * spoilMult
+    ) {
+      this.inventory.cooked--
+    }
+  }
+
+  _syncHousing(world: WorldLike): void {
+    if (this.homeCell) {
+      const c = world.cell(this.homeCell.x, this.homeCell.y)
+      if (!c.building || !c.building.residents.includes(this.id)) {
+        this.homeCell = null
+      }
+    }
+
+    if (this.homeCell && this.becameAdultThisTick) {
+      const c = world.cell(this.homeCell.x, this.homeCell.y)
+      const nearbyAll = world.agentsNear(
+        this.homeCell.x,
+        this.homeCell.y,
+        CFG.GRID_W + CFG.GRID_H,
+      )
+      const hasOtherLivingAdult = !!(
+        c.building &&
+        nearbyAll.some(
+          (a) =>
+            a.id !== this.id &&
+            a.phase === 'adult' &&
+            c.building!.residents.includes(a.id),
+        )
+      )
+      if (hasOtherLivingAdult && c.building) {
+        c.building.residents = c.building.residents.filter((id) => id !== this.id)
+        this.homeCell = null
+      }
+    }
+
+    if (this.homeCell) return
+
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        const x = this.x + dx
+        const y = this.y + dy
+        if (!world.inBounds(x, y)) continue
+        const c = world.cell(x, y)
+        if (!c.building || !c.building.complete) continue
+        if (c.building.residents.length >= c.building.capacity) continue
+        c.building.residents.push(this.id)
+        this.homeCell = { x, y }
+        return
+      }
+    }
+  }
+
+  _shelterEconomy(world: WorldLike): void {
+    if (!this.homeCell) return
+    const home = world.cell(this.homeCell.x, this.homeCell.y)
+    if (!home.building || !home.building.complete || !home.building.inv) return
+    if (
+      Math.abs(this.x - this.homeCell.x) > 1 ||
+      Math.abs(this.y - this.homeCell.y) > 1
+    )
+      return
+
+    const keepSugar = this.needs.hunger > 0.7 ? 4 : 3
+    const keepCooked = this.needs.hunger > 0.7 ? 2 : 1
+    const keepWood = 2
+    const keepMetal = 0.5
+
+    if (this.inventory.sugar > keepSugar) {
+      const give = Math.min(this.inventory.sugar - keepSugar, 2)
+      this.inventory.sugar -= give
+      home.building.inv.sugar += give
+    }
+    if (this.inventory.cooked > keepCooked) {
+      const give = Math.min(this.inventory.cooked - keepCooked, 1)
+      this.inventory.cooked -= give
+      home.building.inv.cooked += give
+    }
+    if (this.inventory.wood > keepWood) {
+      const give = Math.min(this.inventory.wood - keepWood, 2)
+      this.inventory.wood -= give
+      home.building.inv.wood += give
+    }
+    if (this.inventory.metal > keepMetal) {
+      const give = Math.min(this.inventory.metal - keepMetal, 1)
+      this.inventory.metal -= give
+      home.building.inv.metal += give
+    }
+
+    if (this.needs.hunger > 0.45) {
+      if (this.inventory.cooked < 1 && home.building.inv.cooked >= 1) {
+        this.inventory.cooked++
+        home.building.inv.cooked--
+      } else if (this.inventory.sugar < 2 && home.building.inv.sugar >= 1) {
+        this.inventory.sugar++
+        home.building.inv.sugar--
+      }
+    }
+  }
+
+  _hasFoodToEat(): boolean {
+    return this.inventory.sugar > 0 || this.inventory.cooked > 0
+  }
+
+  _eatFromInventory(world: WorldLike): boolean {
+    if (
+      this.inventory.cooked > 0 &&
+      this.ideas.has('EAT_COOKED' as IdeaId) &&
+      IDEAS.EAT_COOKED.canDo(this, world)
+    ) {
+      IDEAS.EAT_COOKED.exec(this, world)
+      this.currentAction = 'PAUSE_PLAN:EAT_COOKED'
+      this.idleTicks = 0
+      return true
+    }
+    if (this.inventory.sugar > 0 && IDEAS.EAT_SUGAR.canDo(this, world)) {
+      IDEAS.EAT_SUGAR.exec(this, world)
+      this.currentAction = 'PAUSE_PLAN:EAT_SUGAR'
+      this.idleTicks = 0
+      return true
+    }
+    return false
+  }
+
+  _abortPlan(reason: string): void {
+    this.plan = null
+    this.currentAction = `ABORT_PLAN:${reason}`
+  }
+
+  _isNearHome(): boolean {
+    if (!this.homeCell) return false
+    return (
+      Math.abs(this.x - this.homeCell.x) <= 1 && Math.abs(this.y - this.homeCell.y) <= 1
+    )
+  }
+
+  _resourceTotal(
+    world: WorldLike,
+    resource: ResourceType,
+    includeHomeInventory: boolean,
+  ): number {
+    let total = this.inventory[resource]
+    if (!includeHomeInventory || !this.homeCell) return total
+    const home = world.cell(this.homeCell.x, this.homeCell.y)
+    if (!home.building || !home.building.complete || !home.building.inv) return total
+    total += home.building.inv[resource]
+    return total
+  }
+
+  _depositToHome(world: WorldLike): boolean {
+    if (!this.homeCell || !this._isNearHome()) return false
+    const home = world.cell(this.homeCell.x, this.homeCell.y)
+    if (!home.building || !home.building.complete || !home.building.inv) return false
+
+    const keepSugar = this.needs.hunger > 0.7 ? 4 : 3
+    const keepCooked = this.needs.hunger > 0.7 ? 2 : 1
+    const keepWood = 2
+    const keepMetal = 0.5
+
+    if (this.inventory.sugar > keepSugar) {
+      const give = Math.min(this.inventory.sugar - keepSugar, 2)
+      this.inventory.sugar -= give
+      home.building.inv.sugar += give
+    }
+    if (this.inventory.cooked > keepCooked) {
+      const give = Math.min(this.inventory.cooked - keepCooked, 1)
+      this.inventory.cooked -= give
+      home.building.inv.cooked += give
+    }
+    if (this.inventory.wood > keepWood) {
+      const give = Math.min(this.inventory.wood - keepWood, 2)
+      this.inventory.wood -= give
+      home.building.inv.wood += give
+    }
+    if (this.inventory.metal > keepMetal) {
+      const give = Math.min(this.inventory.metal - keepMetal, 1)
+      this.inventory.metal -= give
+      home.building.inv.metal += give
+    }
+    return true
+  }
+
+  _createNavigateIdeaPlan(ideaId: IdeaId, target: { x: number; y: number }): void {
+    this.plan = {
+      name: 'NAVIGATE_IDEA',
+      steps: [
+        {
+          kind: 'MOVE_TO',
+          label: `move to ${target.x},${target.y} for ${ideaId}`,
+          x: target.x,
+          y: target.y,
+        },
+        { kind: 'EXEC_IDEA', label: `execute ${ideaId}`, ideaId },
+      ],
+    }
+  }
+
+  _createShelterStockpilePlan(world: WorldLike): boolean {
+    if (!this.homeCell) return false
+    const home = world.cell(this.homeCell.x, this.homeCell.y)
+    if (!home.building || !home.building.complete || !home.building.inv) return false
+
+    const nearHome = this._isNearHome()
+    if (
+      !nearHome &&
+      (this.inventory.sugar > 4 ||
+        this.inventory.cooked > 1 ||
+        this.inventory.wood > 2 ||
+        this.inventory.metal > 0.5)
+    ) {
+      this.plan = {
+        name: 'SHELTER_STOCKPILE',
+        steps: [
+          {
+            kind: 'MOVE_TO',
+            label: `return home ${this.homeCell.x},${this.homeCell.y}`,
+            x: this.homeCell.x,
+            y: this.homeCell.y,
+          },
+          { kind: 'DEPOSIT_HOME', label: 'deposit surplus at home' },
+        ],
+      }
+      return true
+    }
+
+    const totalSugar = this._resourceTotal(world, 'sugar', true)
+    const totalWood = this._resourceTotal(world, 'wood', true)
+    const totalMetal = this._resourceTotal(world, 'metal', true)
+    const totalCooked = this.inventory.cooked + home.building.inv.cooked
+
+    if (totalSugar < 10) {
+      this.plan = {
+        name: 'SHELTER_STOCKPILE',
+        steps: [
+          {
+            kind: 'GATHER_UNTIL',
+            label: 'collect sugar stockpile',
+            ideaId: 'HARVEST_SUGAR',
+            resource: 'sugar',
+            targetTotal: 10,
+            includeHomeInventory: true,
+          },
+        ],
+      }
+      return true
+    }
+
+    if (totalWood < 8) {
+      this.plan = {
+        name: 'SHELTER_STOCKPILE',
+        steps: [
+          {
+            kind: 'GATHER_UNTIL',
+            label: 'collect wood stockpile',
+            ideaId: 'CHOP_WOOD',
+            resource: 'wood',
+            targetTotal: 8,
+            includeHomeInventory: true,
+          },
+        ],
+      }
+      return true
+    }
+
+    if (totalMetal < 2) {
+      this.plan = {
+        name: 'SHELTER_STOCKPILE',
+        steps: [
+          {
+            kind: 'GATHER_UNTIL',
+            label: 'collect metal stockpile',
+            ideaId: 'DIG_METAL',
+            resource: 'metal',
+            targetTotal: 2,
+            includeHomeInventory: true,
+          },
+        ],
+      }
+      return true
+    }
+
+    if (
+      totalCooked < 4 &&
+      this.inventory.sugar >= CFG.COOK_SUGAR &&
+      this.inventory.wood >= CFG.COOK_WOOD
+    ) {
+      this.plan = {
+        name: 'SHELTER_STOCKPILE',
+        steps: [{ kind: 'EXEC_IDEA', label: 'cook food for stockpile', ideaId: 'COOK_FOOD' }],
+      }
+      return true
+    }
+
+    return false
+  }
+
+  _executePlan(world: WorldLike): boolean {
+    if (!this.plan) return false
+
+    if (this.needs.hunger >= CFG.HUNGER_ABORT_PLAN_NOFOOD && !this._hasFoodToEat()) {
+      this._abortPlan('SEVERE_HUNGER_NO_FOOD')
+      return false
+    }
+
+    if (this.needs.hunger >= CFG.HUNGER_PAUSE_PLAN && this._hasFoodToEat()) {
+      if (this._eatFromInventory(world)) return true
+    }
+
+    const reconsiderChance =
+      (1 - this.morals.integrity) * CFG.PLAN_RECONSIDER_MAX_CHANCE
+    if (Math.random() < reconsiderChance) {
+      this._abortPlan('LOW_INTEGRITY_REPLAN')
+      return false
+    }
+
+    for (let guard = 0; guard < 4; guard++) {
+      if (!this.plan || this.plan.steps.length === 0) {
+        this.plan = null
+        return false
+      }
+
+      const step = this.plan.steps[0]
+      if (step.kind === 'MOVE_TO') {
+        if (this.x === step.x && this.y === step.y) {
+          this.plan.steps.shift()
+          continue
+        }
+        const s = stepToward(this.x, this.y, step.x, step.y)
+        world.move(this, s.x, s.y)
+        this.currentAction = `PLAN:${this.plan.name} -> ${step.label}`
+        this.idleTicks = 0
+        return true
+      }
+
+      if (step.kind === 'EXEC_IDEA') {
+        const idea = IDEAS[step.ideaId]
+        if (!idea || !idea.canDo(this, world)) {
+          this._abortPlan(`CANNOT_${step.ideaId}`)
+          return false
+        }
+        idea.exec(this, world)
+        this.currentAction = `PLAN:${this.plan.name} -> ${step.ideaId}`
+        this.idleTicks = 0
+        this.plan.steps.shift()
+        if (this.plan.steps.length === 0) this.plan = null
+        return true
+      }
+
+      if (step.kind === 'GATHER_UNTIL') {
+        const total = this._resourceTotal(
+          world,
+          step.resource,
+          step.includeHomeInventory,
+        )
+        if (total >= step.targetTotal) {
+          this.plan.steps.shift()
+          continue
+        }
+
+        const idea = IDEAS[step.ideaId]
+        if (!idea || !idea.canDo(this, world)) {
+          this._abortPlan(`NO_${step.resource.toUpperCase()}`)
+          return false
+        }
+        idea.exec(this, world)
+        this.currentAction = `PLAN:${this.plan.name} -> ${step.label}`
+        this.idleTicks = 0
+        return true
+      }
+
+      if (step.kind === 'DEPOSIT_HOME') {
+        if (!this._depositToHome(world)) {
+          this._abortPlan('DEPOSIT_FAILED')
+          return false
+        }
+        this.currentAction = `PLAN:${this.plan.name} -> ${step.label}`
+        this.idleTicks = 0
+        this.plan.steps.shift()
+        if (this.plan.steps.length === 0) this.plan = null
+        return true
+      }
+    }
+
+    return false
+  }
 
   _updateMemory(world: WorldLike): void {
     for (let dy = -this.vision; dy <= this.vision; dy++) {
@@ -289,7 +695,6 @@ export class Agent {
         if (!world.inBounds(x, y)) continue
         const c = world.cell(x, y)
         if (c.building) continue
-        // Record all cells that have (or had) resource potential
         if (c.sugarCap > 0 || c.woodCap > 0 || c.metalCap > 0) {
           this.memory.set(`${x},${y}`, {
             x,
@@ -301,14 +706,12 @@ export class Agent {
         }
       }
     }
-    // Cap memory size: evict the first (oldest) entry if over limit
     if (this.memory.size > CFG.MEM_CAP) {
       const oldestKey = this.memory.keys().next().value
       if (oldestKey) this.memory.delete(oldestKey)
     }
   }
 
-  // Passively share memory with nearby social agents
   _shareMemorySocially(world: WorldLike): void {
     if (this.values.social < 0.3) return
     if (Math.random() > CFG.MEM_SHARE_CHANCE * this.values.social) return
@@ -318,50 +721,39 @@ export class Agent {
     if (near.length > 0) shareMemory(this, pick(near))
   }
 
-  // ----------------------------------------------------------------
-  //  Decision loop with navigation commitment
-  //
-  //  Priority order:
-  //    1. Continue committed navigation (unless critically hungry)
-  //    2. Score all known ideas; pick highest
-  //    3. If best idea can't execute: seek its resource via memory
-  //    4. Idle + try to discover new ideas
-  // ----------------------------------------------------------------
-
   _decideAndAct(world: WorldLike): void {
-    // --- Phase 1: Continue navigation commitment ---
-    if (this.navTarget) {
-      // Abandon if critically hungry AND have something to eat
-      if (
-        this.needs.hunger >= CFG.HUNGER_ABANDON_NAV &&
-        (this.inventory.sugar > 0 || (this.inventory.cooked || 0) > 0)
-      ) {
-        this.navTarget = null
-        this.navIdea = null
-        // Fall through to normal scoring (will eat)
-      } else if (this.x === this.navTarget.x && this.y === this.navTarget.y) {
-        // Arrived — execute the intended idea then clear commitment
-        const navIdea = this.navIdea
-        const idea = navIdea ? IDEAS[navIdea] : null
-        if (navIdea && idea && idea.canDo(this, world)) {
-          idea.exec(this, world)
-          this.currentAction = navIdea
-          this.idleTicks = 0
+    if (this.plan && this._executePlan(world)) return
+
+    if (
+      this.needs.hunger >= CFG.HUNGER_NOFOOD_FORAGE &&
+      this.inventory.sugar <= 0 &&
+      (this.inventory.cooked || 0) <= 0
+    ) {
+      const target = world.findResource(
+        this.x,
+        this.y,
+        'sugar',
+        this.vision,
+        this.memory,
+      )
+      if (target) {
+        if (target.x === this.x && target.y === this.y) {
+          IDEAS.HARVEST_SUGAR.exec(this, world)
+          this.currentAction = 'HARVEST_SUGAR'
+        } else {
+          const s = stepToward(this.x, this.y, target.x, target.y)
+          world.move(this, s.x, s.y)
+          this.currentAction = '-> HARVEST_SUGAR'
         }
-        this.navTarget = null
-        this.navIdea = null
-        return
-      } else {
-        // Keep navigating
-        const s = stepToward(this.x, this.y, this.navTarget.x, this.navTarget.y)
-        world.move(this, s.x, s.y)
-        this.currentAction = `→ ${this.navIdea}`
         this.idleTicks = 0
         return
       }
     }
 
-    // --- Phase 2: Score ideas and pick the best ---
+    if (!this.plan && this._createShelterStockpilePlan(world) && this._executePlan(world)) {
+      return
+    }
+
     let bestKey: IdeaId | null = null,
       bestScore = -Infinity
     for (const key of this.ideas) {
@@ -379,13 +771,11 @@ export class Agent {
       const idea = IDEAS[bestKey]
 
       if (idea.canDo(this, world)) {
-        // Execute directly
         idea.exec(this, world)
         this.currentAction = bestKey
         if (bestKey !== 'IDLE') this.idleTicks = 0
         else this._tryDiscover(world)
       } else {
-        // Can't execute right now — find resource in memory and commit to navigating there
         const res = idea.needsRes as ResourceType | null
         if (res) {
           const target = world.findResource(
@@ -396,23 +786,15 @@ export class Agent {
             this.memory,
           )
           if (target && (target.x !== this.x || target.y !== this.y)) {
-            // Commit to navigation
-            this.navTarget = { x: target.x, y: target.y }
-            this.navIdea = bestKey
-            const s = stepToward(this.x, this.y, target.x, target.y)
-            world.move(this, s.x, s.y)
-            this.currentAction = `→ ${bestKey}`
-            this.idleTicks = 0
-            return
+            this._createNavigateIdeaPlan(bestKey, target)
+            if (this._executePlan(world)) return
           } else if (target && target.x === this.x && target.y === this.y) {
-            // Resource is right here but idea still can't execute? Just try again
             idea.exec(this, world)
             this.currentAction = bestKey
             this.idleTicks = 0
             return
           }
         }
-        // No path to resource: idle and discover
         this.idleTicks++
         this.currentAction = 'idle'
         this._tryDiscover(world)
@@ -424,23 +806,23 @@ export class Agent {
     }
   }
 
-  // ----------------------------------------------------------------
-  //  Idea discovery and spreading
-  // ----------------------------------------------------------------
-
   _tryDiscover(world: WorldLike): void {
     if (this.idleTicks < CFG.IDLE_THRESHOLD) return
     const curiBonus = 1 + this.morals.curiosity * 2.5
 
-    const inHouse = !!(
+    const inShelter = !!(
       this.homeCell &&
       (() => {
         const c = world.cell(this.homeCell.x, this.homeCell.y)
-        return c.building && c.building.type === 'house' && c.building.complete
+        return (
+          c.building &&
+          c.building.complete &&
+          (c.building.type === 'shelter' || c.building.type === 'house')
+        )
       })()
     )
 
-    const pool = inHouse ? [...TIER1, ...TIER2] : TIER1
+    const pool = inShelter ? [...TIER1, ...TIER2] : TIER1
 
     if (Math.random() < CFG.DISCOVER_CHANCE * curiBonus) {
       const candidates = pool.filter(
@@ -469,10 +851,6 @@ export class Agent {
       }
     }
   }
-
-  // ----------------------------------------------------------------
-  //  Building advancement, altruism
-  // ----------------------------------------------------------------
 
   _advanceBuilding(world: WorldLike): void {
     if (!this.homeCell) return

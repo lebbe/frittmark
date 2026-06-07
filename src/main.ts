@@ -34,7 +34,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     </div>
     <div class="slider-wrap">
       <div class="slider-labels"><span>Tick speed</span><span id="speed-val">1000ms</span></div>
-      <input type="range" id="speed-slider" min="1" max="1000" value="1000" step="1">
+      <input type="range" id="speed-slider" min="1" max="1000" value="1" step="1">
     </div>
   </div>
 

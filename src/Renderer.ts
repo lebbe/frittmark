@@ -7,7 +7,7 @@ import { CFG } from './config'
 type RenderAgent = {
   x: number
   y: number
-  navTarget: { x: number; y: number } | null
+  plan: { name: string; steps: unknown[] } | null
   phase: 'toddler' | 'child' | 'youth' | 'adult'
 }
 
@@ -106,8 +106,8 @@ export class Renderer {
         const here = aMap.get(y * W + x)
         if (here) {
           const a = here[0]
-          // Navigating agents are shown in blue, others by phase
-          ctx.fillStyle = a.navTarget
+          // Agents currently executing a plan are shown in blue, others by phase
+          ctx.fillStyle = a.plan
             ? '#44aaff'
             : a.phase === 'adult'
               ? '#ff4040'
