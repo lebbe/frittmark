@@ -6,6 +6,7 @@ type InventoryLike = {
   sugar?: number
   wood?: number
   metal?: number
+  rock?: number
   cooked?: number
   axe?: number
   spade?: number
@@ -49,6 +50,7 @@ export function totalWealth(a: WealthCarrier): number {
     (i.sugar || 0) +
     (i.wood || 0) * 2 +
     (i.metal || 0) * 5 +
+    (i.rock || 0) * 1.2 +
     (i.cooked || 0) * 1.5 +
     ((i.axe || 0) > 0 ? 4 : 0) +
     ((i.spade || 0) > 0 ? 4 : 0) +

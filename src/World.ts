@@ -6,7 +6,7 @@ import { CFG } from './config'
 import { Agent } from './Agent'
 import { mdist, rand } from './utils'
 
-type ResourceType = 'sugar' | 'wood' | 'metal'
+type ResourceType = 'sugar' | 'wood' | 'metal' | 'rock'
 
 type ResourceMemoryEntry = {
   x: number
@@ -14,6 +14,7 @@ type ResourceMemoryEntry = {
   sugar?: number
   wood?: number
   metal?: number
+  rock?: number
 }
 
 type BuildingInventory = {
@@ -41,6 +42,9 @@ type Cell = {
   woodCap: number
   metal: number
   metalCap: number
+  rock: number
+  rockCap: number
+  path: boolean
   building: Building | null
 }
 
@@ -77,6 +81,9 @@ export class World {
         woodCap: 0,
         metal: 0,
         metalCap: 0,
+        rock: 0,
+        rockCap: 0,
+        path: false,
         building: null,
       }
     }
@@ -98,6 +105,11 @@ export class World {
       cx: rand(12, W - 12),
       cy: rand(12, H - 12),
       r: rand(4, 9),
+    }))
+    const rks = Array.from({ length: 7 }, () => ({
+      cx: rand(10, W - 10),
+      cy: rand(10, H - 10),
+      r: rand(5, 11),
     }))
 
     for (let y = 0; y < H; y++) {
@@ -128,6 +140,15 @@ export class World {
         }
         c.metalCap = mc
         c.metal = mc
+        let rc = 0
+        for (const r of rks) {
+          const d = mdist(x, y, r.cx, r.cy)
+          if (d < r.r)
+            rc = Math.max(rc, Math.round(CFG.ROCK_MAX * (1 - d / r.r)))
+        }
+        if (Math.random() < 0.12) rc = Math.max(rc, rand(1, 3))
+        c.rockCap = rc
+        c.rock = rc
       }
     }
   }
@@ -138,6 +159,7 @@ export class World {
       c.sugar = Math.min(c.sugarCap, c.sugar + CFG.SUGAR_REGEN)
       c.wood = Math.min(c.woodCap, c.wood + CFG.WOOD_REGEN)
       c.metal = Math.min(c.metalCap, c.metal + CFG.METAL_REGEN)
+      c.rock = Math.min(c.rockCap, c.rock + CFG.ROCK_REGEN)
     }
   }
 
@@ -199,12 +221,16 @@ export class World {
     if (!this.inBounds(x, y)) return
 
     const ticksPerStep = agent.getTravelTicksPerStep(this)
-    if (ticksPerStep > 1) {
+    const targetCell = this.cell(x, y)
+    const effectiveTicks = targetCell.path
+      ? Math.max(1, ticksPerStep - 1)
+      : ticksPerStep
+    if (effectiveTicks > 1) {
       if (agent.travelTicksUntilMove > 0) {
         agent.travelTicksUntilMove--
         return
       }
-      agent.travelTicksUntilMove = ticksPerStep - 1
+      agent.travelTicksUntilMove = effectiveTicks - 1
     } else {
       agent.travelTicksUntilMove = 0
     }

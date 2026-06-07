@@ -211,6 +211,14 @@ input[type='range']::-webkit-slider-thumb {
   background: #507085;
 }
 
+.legend-rock {
+  background: #6f6f6f;
+}
+
+.legend-path {
+  background: #969696;
+}
+
 .legend-adult {
   background: #ff4040;
 }

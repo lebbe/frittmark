@@ -243,6 +243,7 @@ function renderModal(): void {
     ['sugar', 'Sugar'],
     ['wood', 'Wood'],
     ['metal', 'Metal'],
+    ['rock', 'Rock'],
     ['cooked', 'Cooked food'],
     ['axe', 'Axe (dur)'],
     ['spade', 'Spade (dur)'],

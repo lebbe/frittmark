@@ -83,6 +83,8 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
       <div class="legend-row"><div class="sw legend-sugar"></div>Sugar</div>
       <div class="legend-row"><div class="sw legend-wood"></div>Wood</div>
       <div class="legend-row"><div class="sw legend-metal"></div>Metal</div>
+      <div class="legend-row"><div class="sw legend-rock"></div>Rock</div>
+      <div class="legend-row"><div class="sw legend-path"></div>Stone path</div>
       <div class="legend-row"><div class="sw legend-adult"></div>Adult agent</div>
       <div class="legend-row"><div class="sw legend-nav"></div>Navigating agent</div>
       <div class="legend-row"><div class="sw legend-young"></div>Toddler / Child</div>
@@ -243,27 +245,35 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 
     const cell = sim.world.cell(x, y)
-    const totalResource = cell.sugar + cell.wood + cell.metal
+    const totalResource = cell.sugar + cell.wood + cell.metal + cell.rock
     let status = `Cell (${x}, ${y})\nType: empty`
 
     if (cell.building) {
       const b = cell.building
       const progress = `${b.progress}/${b.progressMax}`
       status = `Cell (${x}, ${y})\nType: ${b.type}${b.complete ? '' : ' (under construction)'}\nProgress: ${progress}\nInventory: sugar ${Math.floor(b.inv.sugar)}, wood ${Math.floor(b.inv.wood)}, metal ${Math.floor(b.inv.metal)}, cooked ${Math.floor(b.inv.cooked)}`
+    } else if (cell.path) {
+      status = `Cell (${x}, ${y})\nType: stone path`
     } else if (totalResource > 0) {
       const dominant =
-        cell.sugar >= cell.wood && cell.sugar >= cell.metal
+        cell.sugar >= cell.wood &&
+        cell.sugar >= cell.metal &&
+        cell.sugar >= cell.rock
           ? 'sugar'
-          : cell.wood >= cell.metal
+          : cell.wood >= cell.metal && cell.wood >= cell.rock
             ? 'wood'
-            : 'metal'
+            : cell.metal >= cell.rock
+              ? 'metal'
+              : 'rock'
       const dominantAmount =
         dominant === 'sugar'
           ? cell.sugar
           : dominant === 'wood'
             ? cell.wood
-            : cell.metal
-      status = `Cell (${x}, ${y})\nType: resource (${dominant})\nAmount: ${dominantAmount.toFixed(1)}\nSugar: ${cell.sugar.toFixed(1)}, Wood: ${cell.wood.toFixed(1)}, Metal: ${cell.metal.toFixed(1)}`
+            : dominant === 'metal'
+              ? cell.metal
+              : cell.rock
+      status = `Cell (${x}, ${y})\nType: resource (${dominant})\nAmount: ${dominantAmount.toFixed(1)}\nSugar: ${cell.sugar.toFixed(1)}, Wood: ${cell.wood.toFixed(1)}, Metal: ${cell.metal.toFixed(1)}, Rock: ${cell.rock.toFixed(1)}`
     }
 
     canvas.title = status

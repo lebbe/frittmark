@@ -17,7 +17,7 @@ import { clamp, pick, stepToward } from './utils'
 
 type ResourceKey = 'sugar' | 'wood' | 'metal' | 'cooked'
 type ToolKey = 'axe' | 'spade' | 'pick'
-type InventoryKey = ResourceKey | ToolKey
+type InventoryKey = ResourceKey | ToolKey | 'rock'
 
 type IdeaAgent = {
   id: number
@@ -45,7 +45,14 @@ type IdeaAgent = {
   ideas: Set<string>
   memory: Map<
     string,
-    { x: number; y: number; sugar?: number; wood?: number; metal?: number }
+    {
+      x: number
+      y: number
+      sugar?: number
+      wood?: number
+      metal?: number
+      rock?: number
+    }
   >
   inventory: Record<InventoryKey, number>
 }
@@ -57,6 +64,9 @@ type IdeaCell = {
   woodCap: number
   metal: number
   metalCap: number
+  rock: number
+  rockCap: number
+  path: boolean
   building: {
     type: 'shelter' | 'house'
     ownerId: number
@@ -74,7 +84,7 @@ type IdeaWorld = {
   findResource(
     x: number,
     y: number,
-    type: 'sugar' | 'wood' | 'metal',
+    type: 'sugar' | 'wood' | 'metal' | 'rock',
     vision: number,
     memory: IdeaAgent['memory'],
   ): { x: number; y: number } | null
@@ -86,7 +96,7 @@ type IdeaWorld = {
 type IdeaDef = {
   tier: 0 | 1 | 2
   requires: string[]
-  needsRes: 'sugar' | 'wood' | 'metal' | null
+  needsRes: 'sugar' | 'wood' | 'metal' | 'rock' | null
   score(a: IdeaAgent, w: IdeaWorld): number
   canDo(a: IdeaAgent, w: IdeaWorld): boolean
   exec(a: IdeaAgent, w: IdeaWorld): boolean
@@ -231,6 +241,35 @@ export const IDEAS: Record<string, IdeaDef> = {
         c.metal = Math.max(0, c.metal - got)
         a.inventory.metal += got
         if (a.inventory.pick > 0) a.inventory.pick--
+      }
+      return true
+    },
+  },
+
+  QUARRY_ROCK: {
+    tier: 0,
+    requires: [],
+    needsRes: 'rock',
+    score(a, w) {
+      const hungerPenalty = clamp(1 - a.needs.hunger * 0.8, 0.2, 1)
+      const stockPenalty = clamp(1.25 - a.inventory.rock / 10, 0.3, 1.25)
+      return w.findResource(a.x, a.y, 'rock', a.vision, a.memory)
+        ? a.values.building * 3.2 * hungerPenalty * stockPenalty
+        : 0
+    },
+    canDo(a, w) {
+      return !!w.findResource(a.x, a.y, 'rock', a.vision, a.memory)
+    },
+    exec(a, w) {
+      const t = w.findResource(a.x, a.y, 'rock', a.vision, a.memory)
+      if (!t) return false
+      const s = stepToward(a.x, a.y, t.x, t.y)
+      w.move(a, s.x, s.y)
+      if (a.x === t.x && a.y === t.y) {
+        const c = w.cell(a.x, a.y)
+        const got = Math.min(Math.floor(c.rock), 2)
+        c.rock = Math.max(0, c.rock - got)
+        a.inventory.rock += got
       }
       return true
     },
@@ -461,6 +500,39 @@ export const IDEAS: Record<string, IdeaDef> = {
     },
   },
 
+  LAY_STONE_PATH: {
+    tier: 1,
+    requires: ['QUARRY_ROCK', 'BUILD_SHELTER'],
+    needsRes: null,
+    score(a, w) {
+      const c = w.cell(a.x, a.y)
+      if (c.building || c.path) return 0
+      if (a.inventory.rock < CFG.STONE_PATH_ROCK_COST) return 0
+      if (a.needs.hunger > 0.6) return 0
+      const nearHome =
+        !!a.homeCell &&
+        Math.abs(a.x - a.homeCell.x) <= 3 &&
+        Math.abs(a.y - a.homeCell.y) <= 3
+      return nearHome ? a.values.building * 1.6 : 0
+    },
+    canDo(a, w) {
+      const c = w.cell(a.x, a.y)
+      return (
+        !c.building &&
+        !c.path &&
+        a.inventory.rock >= CFG.STONE_PATH_ROCK_COST &&
+        a.needs.hunger <= 0.6
+      )
+    },
+    exec(a, w) {
+      if (!this.canDo(a, w)) return false
+      const c = w.cell(a.x, a.y)
+      c.path = true
+      a.inventory.rock -= CFG.STONE_PATH_ROCK_COST
+      return true
+    },
+  },
+
   TRADE: {
     tier: 1,
     requires: ['COOK_FOOD'],
@@ -496,7 +568,12 @@ export const IDEAS: Record<string, IdeaDef> = {
     requires: ['BUILD_SHELTER'],
     needsRes: 'wood',
     score(a, w) {
-      if (a.homeCell || a.inventory.wood < CFG.HOUSE_WOOD) return 0
+      if (
+        a.homeCell ||
+        a.inventory.wood < CFG.HOUSE_WOOD ||
+        a.inventory.rock < CFG.HOUSE_ROCK
+      )
+        return 0
       if (!isHousePlotAllowed(w.cell(a.x, a.y))) return 0
       const partner = w
         .agentsNear(a.x, a.y, 1)
@@ -504,7 +581,12 @@ export const IDEAS: Record<string, IdeaDef> = {
       return partner ? a.values.building * 7 : 0
     },
     canDo(a, w) {
-      if (a.homeCell || a.inventory.wood < CFG.HOUSE_WOOD) return false
+      if (
+        a.homeCell ||
+        a.inventory.wood < CFG.HOUSE_WOOD ||
+        a.inventory.rock < CFG.HOUSE_ROCK
+      )
+        return false
       if (w.cell(a.x, a.y).building) return false
       if (!isHousePlotAllowed(w.cell(a.x, a.y))) return false
       return w
@@ -517,11 +599,21 @@ export const IDEAS: Record<string, IdeaDef> = {
         .find((b) => b.id !== a.id && b.ideas.has('BUILD_HOUSE') && !b.homeCell)
       if (!p || w.cell(a.x, a.y).building) return false
       if (!isHousePlotAllowed(w.cell(a.x, a.y))) return false
-      const half = Math.floor(CFG.HOUSE_WOOD / 2),
-        rest = CFG.HOUSE_WOOD - half
-      if (a.inventory.wood < half || p.inventory.wood < rest) return false
-      a.inventory.wood -= half
-      p.inventory.wood -= rest
+      const halfWood = Math.floor(CFG.HOUSE_WOOD / 2),
+        restWood = CFG.HOUSE_WOOD - halfWood
+      const halfRock = Math.floor(CFG.HOUSE_ROCK / 2),
+        restRock = CFG.HOUSE_ROCK - halfRock
+      if (
+        a.inventory.wood < halfWood ||
+        p.inventory.wood < restWood ||
+        a.inventory.rock < halfRock ||
+        p.inventory.rock < restRock
+      )
+        return false
+      a.inventory.wood -= halfWood
+      p.inventory.wood -= restWood
+      a.inventory.rock -= halfRock
+      p.inventory.rock -= restRock
       const c = w.cell(a.x, a.y)
       c.building = {
         type: 'house',

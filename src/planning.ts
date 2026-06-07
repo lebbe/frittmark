@@ -1,6 +1,6 @@
 import { CFG } from './config'
 
-export type ResourceType = 'sugar' | 'wood' | 'metal'
+export type ResourceType = 'sugar' | 'wood' | 'metal' | 'rock'
 export type PlanName =
   | 'NAVIGATE_IDEA'
   | 'SHELTER_STOCKPILE'
@@ -70,6 +70,7 @@ type PlanningAgent = {
     sugar: number
     wood: number
     metal: number
+    rock: number
     cooked: number
     axe?: number
     spade?: number
@@ -98,6 +99,7 @@ export function resourceTotal(
   if (!includeHomeInventory || !hasCompleteHome(a, world) || !a.homeCell) {
     return total
   }
+  if (resource === 'rock') return total
   const home = world.cell(a.homeCell.x, a.homeCell.y)
   total += home.building!.inv![resource]
   return total
@@ -504,6 +506,16 @@ export function createHouseUpgradePlan(
       ideaId: 'CHOP_WOOD',
       resource: 'wood',
       targetTotal: CFG.HOUSE_WOOD,
+      includeHomeInventory: false,
+    })
+  }
+  if (a.inventory.rock < CFG.HOUSE_ROCK && a.ideas.has('QUARRY_ROCK')) {
+    steps.push({
+      kind: 'GATHER_UNTIL',
+      label: 'gather rock for house foundation',
+      ideaId: 'QUARRY_ROCK',
+      resource: 'rock',
+      targetTotal: CFG.HOUSE_ROCK,
       includeHomeInventory: false,
     })
   }

@@ -41,6 +41,7 @@ type AgentInventory = {
   sugar: number
   wood: number
   metal: number
+  rock: number
   cooked: number
   axe: number
   spade: number
@@ -53,6 +54,7 @@ type MemoryEntry = {
   sugar: number
   wood: number
   metal: number
+  rock: number
 }
 
 type HomeCell = {
@@ -67,6 +69,9 @@ type CellLike = {
   woodCap: number
   metal: number
   metalCap: number
+  rock: number
+  rockCap: number
+  path: boolean
   building: {
     type: 'shelter' | 'house'
     ownerId: number
@@ -173,6 +178,7 @@ export class Agent {
         sugar: 0,
         wood: 0,
         metal: 0,
+        rock: 0,
         cooked: 0,
         axe: 0,
         spade: 0,
@@ -183,6 +189,7 @@ export class Agent {
         sugar: rand(2, 6),
         wood: 0,
         metal: 0,
+        rock: 0,
         cooked: 0,
         axe: 0,
         spade: 0,
@@ -281,6 +288,7 @@ export class Agent {
     this.inventory.sugar = 0
     this.inventory.wood = 0
     this.inventory.metal = 0
+    this.inventory.rock = 0
     this.inventory.cooked = 0
     this.inventory.axe = 0
     this.inventory.spade = 0
@@ -758,13 +766,14 @@ export class Agent {
         if (!world.inBounds(x, y)) continue
         const c = world.cell(x, y)
         if (c.building) continue
-        if (c.sugarCap > 0 || c.woodCap > 0 || c.metalCap > 0) {
+        if (c.sugarCap > 0 || c.woodCap > 0 || c.metalCap > 0 || c.rockCap > 0) {
           this.memory.set(`${x},${y}`, {
             x,
             y,
             sugar: c.sugar,
             wood: c.wood,
             metal: c.metal,
+            rock: c.rock,
           })
         }
       }

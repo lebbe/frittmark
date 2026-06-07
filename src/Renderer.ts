@@ -15,6 +15,8 @@ type RenderCell = {
   sugar: number
   wood: number
   metal: number
+  rock: number
+  path: boolean
   building: {
     type: 'shelter' | 'house'
     complete: boolean
@@ -34,6 +36,8 @@ const BG = [13, 13, 13]
 const SUGAR = [200, 160, 30]
 const WOOD = [50, 105, 60]
 const METAL = [75, 115, 140]
+const ROCK = [110, 110, 110]
+const PATH = [150, 150, 150]
 
 function blendRGB(rgb: number[], t: number): string {
   return `rgb(${Math.round(BG[0] + (rgb[0] - BG[0]) * t)},${Math.round(BG[1] + (rgb[1] - BG[1]) * t)},${Math.round(BG[2] + (rgb[2] - BG[2]) * t)})`
@@ -93,11 +97,19 @@ export class Renderer {
           }
         } else {
           let col
-          if (c.sugar >= c.wood && c.sugar >= c.metal && c.sugar > 0.4)
+          if (c.path) col = blendRGB(PATH, 0.75)
+          else if (
+            c.sugar >= c.wood &&
+            c.sugar >= c.metal &&
+            c.sugar >= c.rock &&
+            c.sugar > 0.4
+          )
             col = blendRGB(SUGAR, c.sugar / CFG.SUGAR_MAX)
-          else if (c.wood >= c.metal && c.wood > 0.4)
+          else if (c.wood >= c.metal && c.wood >= c.rock && c.wood > 0.4)
             col = blendRGB(WOOD, c.wood / CFG.WOOD_MAX)
-          else if (c.metal > 0.4) col = blendRGB(METAL, c.metal / CFG.METAL_MAX)
+          else if (c.metal >= c.rock && c.metal > 0.4)
+            col = blendRGB(METAL, c.metal / CFG.METAL_MAX)
+          else if (c.rock > 0.4) col = blendRGB(ROCK, c.rock / CFG.ROCK_MAX)
           else col = `rgb(${BG[0]},${BG[1]},${BG[2]})`
           ctx.fillStyle = col
           ctx.fillRect(dx, dy, px, px)
