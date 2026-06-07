@@ -121,6 +121,8 @@ export class Agent {
   currentAction: string
   ideas: Set<IdeaId>
   becameAdultThisTick: boolean
+  parentIds: number[]
+  travelTicksUntilMove: number
 
   constructor(
     id: number,
@@ -138,6 +140,10 @@ export class Agent {
     this.reproCooldown = 0
     this.homeCell = null
     this.phase = p1 || p2 ? 'toddler' : 'adult'
+    this.parentIds = [p1?.id, p2?.id].filter(
+      (id): id is number => id !== undefined,
+    )
+    this.travelTicksUntilMove = 0
 
     this.vision = p1
       ? clamp(
@@ -164,14 +170,26 @@ export class Agent {
     this.values = this._initValues(p1, p2)
     this.morals = this._initMorals(p1, p2)
 
-    this.inventory = {
-      sugar: rand(2, 6),
-      wood: 0,
-      metal: 0,
-      cooked: 0,
-      axe: 0,
-      spade: 0,
-      pick: 0,
+    if (this.phase === 'toddler') {
+      this.inventory = {
+        sugar: 0,
+        wood: 0,
+        metal: 0,
+        cooked: 0,
+        axe: 0,
+        spade: 0,
+        pick: 0,
+      }
+    } else {
+      this.inventory = {
+        sugar: rand(2, 6),
+        wood: 0,
+        metal: 0,
+        cooked: 0,
+        axe: 0,
+        spade: 0,
+        pick: 0,
+      }
     }
 
     this.memory = new Map<string, MemoryEntry>()
@@ -238,6 +256,70 @@ export class Agent {
     return out
   }
 
+  getTravelTicksPerStep(world: WorldLike): number {
+    return this._hasDependentToddler(world) ? 2 : 1
+  }
+
+  _hasDependentToddler(world: WorldLike): boolean {
+    if (this.phase !== 'adult') return false
+    const allAgents = world.agentsNear(this.x, this.y, CFG.GRID_W + CFG.GRID_H)
+    return allAgents.some(
+      (a) =>
+        a.alive &&
+        a.phase === 'toddler' &&
+        a.parentIds.length > 0 &&
+        a.parentIds.includes(this.id),
+    )
+  }
+
+  _resolveParents(world: WorldLike): Agent[] {
+    if (this.parentIds.length === 0) return []
+    const allAgents = world.agentsNear(this.x, this.y, CFG.GRID_W + CFG.GRID_H)
+    return allAgents.filter((a) => a.alive && this.parentIds.includes(a.id))
+  }
+
+  _enforceToddlerNoInventory(): void {
+    if (this.phase !== 'toddler') return
+    this.inventory.sugar = 0
+    this.inventory.wood = 0
+    this.inventory.metal = 0
+    this.inventory.cooked = 0
+    this.inventory.axe = 0
+    this.inventory.spade = 0
+    this.inventory.pick = 0
+  }
+
+  _feedToddlerFromParents(world: WorldLike): boolean {
+    if (this.phase !== 'toddler') return false
+    const parents = this._resolveParents(world)
+
+    for (const p of parents) {
+      if (p.inventory.cooked > 0) {
+        p.inventory.cooked--
+        this.needs.hunger = clamp(
+          this.needs.hunger - CFG.COOKED_EAT_RESTORE,
+          0,
+          1,
+        )
+        return true
+      }
+    }
+
+    for (const p of parents) {
+      if (p.inventory.sugar > 0) {
+        p.inventory.sugar--
+        this.needs.hunger = clamp(
+          this.needs.hunger - CFG.SUGAR_EAT_RESTORE,
+          0,
+          1,
+        )
+        return true
+      }
+    }
+
+    return false
+  }
+
   tick(world: WorldLike): void {
     this.age++
     this.reproCooldown = Math.max(0, this.reproCooldown - 1)
@@ -252,14 +334,11 @@ export class Agent {
     this._spoilCarriedFood(world)
 
     if (this.phase === 'toddler') {
-      if (this.needs.hunger > 0.5 && this.inventory.sugar > 0) {
-        this.inventory.sugar--
-        this.needs.hunger = clamp(
-          this.needs.hunger - CFG.SUGAR_EAT_RESTORE,
-          0,
-          1,
-        )
+      this._enforceToddlerNoInventory()
+      if (this.needs.hunger > 0.5) {
+        this._feedToddlerFromParents(world)
       }
+      this._enforceToddlerNoInventory()
     } else {
       this._shelterEconomy(world)
       this._updateMemory(world)
@@ -332,7 +411,9 @@ export class Agent {
         )
       )
       if (hasOtherLivingAdult && c.building) {
-        c.building.residents = c.building.residents.filter((id) => id !== this.id)
+        c.building.residents = c.building.residents.filter(
+          (id) => id !== this.id,
+        )
         this.homeCell = null
       }
     }
@@ -433,7 +514,8 @@ export class Agent {
   _isNearHome(): boolean {
     if (!this.homeCell) return false
     return (
-      Math.abs(this.x - this.homeCell.x) <= 1 && Math.abs(this.y - this.homeCell.y) <= 1
+      Math.abs(this.x - this.homeCell.x) <= 1 &&
+      Math.abs(this.y - this.homeCell.y) <= 1
     )
   }
 
@@ -445,7 +527,8 @@ export class Agent {
     let total = this.inventory[resource]
     if (!includeHomeInventory || !this.homeCell) return total
     const home = world.cell(this.homeCell.x, this.homeCell.y)
-    if (!home.building || !home.building.complete || !home.building.inv) return total
+    if (!home.building || !home.building.complete || !home.building.inv)
+      return total
     total += home.building.inv[resource]
     return total
   }
@@ -453,7 +536,8 @@ export class Agent {
   _depositToHome(world: WorldLike): boolean {
     if (!this.homeCell || !this._isNearHome()) return false
     const home = world.cell(this.homeCell.x, this.homeCell.y)
-    if (!home.building || !home.building.complete || !home.building.inv) return false
+    if (!home.building || !home.building.complete || !home.building.inv)
+      return false
 
     const keepSugar = this.needs.hunger > 0.7 ? 4 : 3
     const keepCooked = this.needs.hunger > 0.7 ? 2 : 1
@@ -483,7 +567,10 @@ export class Agent {
     return true
   }
 
-  _createNavigateIdeaPlan(ideaId: IdeaId, target: { x: number; y: number }): void {
+  _createNavigateIdeaPlan(
+    ideaId: IdeaId,
+    target: { x: number; y: number },
+  ): void {
     this.plan = {
       name: 'NAVIGATE_IDEA',
       steps: [
@@ -501,7 +588,8 @@ export class Agent {
   _createShelterStockpilePlan(world: WorldLike): boolean {
     if (!this.homeCell) return false
     const home = world.cell(this.homeCell.x, this.homeCell.y)
-    if (!home.building || !home.building.complete || !home.building.inv) return false
+    if (!home.building || !home.building.complete || !home.building.inv)
+      return false
 
     const nearHome = this._isNearHome()
     if (
@@ -589,7 +677,13 @@ export class Agent {
     ) {
       this.plan = {
         name: 'SHELTER_STOCKPILE',
-        steps: [{ kind: 'EXEC_IDEA', label: 'cook food for stockpile', ideaId: 'COOK_FOOD' }],
+        steps: [
+          {
+            kind: 'EXEC_IDEA',
+            label: 'cook food for stockpile',
+            ideaId: 'COOK_FOOD',
+          },
+        ],
       }
       return true
     }
@@ -600,7 +694,10 @@ export class Agent {
   _executePlan(world: WorldLike): boolean {
     if (!this.plan) return false
 
-    if (this.needs.hunger >= CFG.HUNGER_ABORT_PLAN_NOFOOD && !this._hasFoodToEat()) {
+    if (
+      this.needs.hunger >= CFG.HUNGER_ABORT_PLAN_NOFOOD &&
+      !this._hasFoodToEat()
+    ) {
       this._abortPlan('SEVERE_HUNGER_NO_FOOD')
       return false
     }
@@ -750,7 +847,11 @@ export class Agent {
       }
     }
 
-    if (!this.plan && this._createShelterStockpilePlan(world) && this._executePlan(world)) {
+    if (
+      !this.plan &&
+      this._createShelterStockpilePlan(world) &&
+      this._executePlan(world)
+    ) {
       return
     }
 
@@ -866,7 +967,10 @@ export class Agent {
     if (this.morals.altruism < 0.65 || this.inventory.sugar < 7) return
     const starving = world
       .agentsNear(this.x, this.y, 2)
-      .find((b) => b.id !== this.id && b.needs.hunger > 0.75)
+      .find(
+        (b) =>
+          b.id !== this.id && b.phase !== 'toddler' && b.needs.hunger > 0.75,
+      )
     if (starving) {
       this.inventory.sugar--
       starving.inventory.sugar++

@@ -196,10 +196,21 @@ export class World {
   }
 
   move(agent: Agent, x: number, y: number): void {
-    if (this.inBounds(x, y)) {
-      agent.x = x
-      agent.y = y
+    if (!this.inBounds(x, y)) return
+
+    const ticksPerStep = agent.getTravelTicksPerStep(this)
+    if (ticksPerStep > 1) {
+      if (agent.travelTicksUntilMove > 0) {
+        agent.travelTicksUntilMove--
+        return
+      }
+      agent.travelTicksUntilMove = ticksPerStep - 1
+    } else {
+      agent.travelTicksUntilMove = 0
     }
+
+    agent.x = x
+    agent.y = y
   }
 
   spawn(p1: Agent | null = null, p2: Agent | null = null): Agent {
