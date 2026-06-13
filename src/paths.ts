@@ -52,7 +52,12 @@ function dominantTerrainCost(cell: PathCellLike): number {
   return CFG.MOVE_COST_SUGAR
 }
 
-function heuristic(fromX: number, fromY: number, toX: number, toY: number): number {
+function heuristic(
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number,
+): number {
   const dx = Math.abs(toX - fromX)
   const dy = Math.abs(toY - fromY)
   const d = Math.max(0.05, CFG.MOVE_COST_EMPTY * CFG.MOVE_MULT_STONE_ROAD)

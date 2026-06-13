@@ -1,7 +1,7 @@
 import type { Agent } from './Agent'
 import { CFG } from './config'
 import { ALL_IDEA_KEYS, IDEAS, hasPrereqs, type IdeaId } from './ideas'
-import { PLAN_REGISTRY, type PlanName } from './planning'
+import { PLAN_REGISTRY } from './planning'
 import type { Renderer } from './Renderer'
 import type { Simulation } from './Simulation'
 import { grantIdea, totalWealth } from './utils'
@@ -143,15 +143,17 @@ export function updateUI(): void {
 
   const totals = new Map<keyof Agent['inventory'], number>()
   for (const a of agents) {
-    for (const key of Object.keys(a.inventory) as Array<keyof Agent['inventory']>) {
+    for (const key of Object.keys(a.inventory) as Array<
+      keyof Agent['inventory']
+    >) {
       totals.set(key, (totals.get(key) || 0) + (a.inventory[key] || 0))
     }
   }
 
   const invKeys = sortInventoryKeys([
-    ...new Set(
-      [...INVENTORY_ORDER, ...totals.keys()] as Array<keyof Agent['inventory']>,
-    ),
+    ...new Set([...INVENTORY_ORDER, ...totals.keys()] as Array<
+      keyof Agent['inventory']
+    >),
   ])
   mustEl('s-inventory').innerHTML = invKeys
     .map(
@@ -208,8 +210,14 @@ export function renderPlanRegistry(): void {
   const panel = mustEl('plans-panel')
   panel.innerHTML = ''
 
-  for (const planName of PLAN_REGISTRY) {
-    const count = agents.filter((a) => a.plan?.name === planName).length
+  // Collect plan name counts from every agent that currently holds a plan
+  const counts = new Map<string, number>()
+  for (const a of agents) {
+    if (a.plan) counts.set(a.plan.name, (counts.get(a.plan.name) ?? 0) + 1)
+  }
+  if (counts.size === 0) return
+
+  for (const [planName, count] of [...counts.entries()].sort()) {
     const row = document.createElement('div')
     row.className = 'plan-reg-row'
     row.innerHTML = `
@@ -220,7 +228,7 @@ export function renderPlanRegistry(): void {
   }
 }
 
-function formatPlanName(name: PlanName): string {
+function formatPlanName(name: string): string {
   return name.replace(/_/g, ' ').toLowerCase()
 }
 

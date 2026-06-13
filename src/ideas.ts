@@ -15,6 +15,7 @@
 import { CFG } from './config'
 import { getNextPathStep, getRouteType, setRouteType } from './paths'
 import { clamp, pick } from './utils'
+import type { AgentPlan, PlanStep } from './planning'
 
 type ResourceKey = 'sugar' | 'wood' | 'metal' | 'cooked'
 type ToolKey = 'axe' | 'spade' | 'pick'
@@ -117,7 +118,11 @@ function houseUpgradeWoodTotal(a: IdeaAgent, home: IdeaCell): number {
   return a.inventory.wood + (home.building?.inv?.wood ?? 0)
 }
 
-function spendHouseUpgradeWood(a: IdeaAgent, home: IdeaCell, amount: number): boolean {
+function spendHouseUpgradeWood(
+  a: IdeaAgent,
+  home: IdeaCell,
+  amount: number,
+): boolean {
   const available = houseUpgradeWoodTotal(a, home)
   if (available < amount) return false
 
@@ -137,6 +142,7 @@ type IdeaDef = {
   score(a: IdeaAgent, w: IdeaWorld): number
   canDo(a: IdeaAgent, w: IdeaWorld): boolean
   exec(a: IdeaAgent, w: IdeaWorld): boolean
+  plan?(a: IdeaAgent, w: IdeaWorld): AgentPlan | null
 }
 
 function isBuildingPlotAllowed(c: IdeaCell): boolean {
@@ -195,16 +201,37 @@ export const IDEAS: Record<string, IdeaDef> = {
     score(a, w) {
       if (a.inventory.sugar >= CFG.SUGAR_CARRY_CAP) return 0
       const satiety = clamp(1.2 - a.inventory.sugar / 10, 0.25, 1.2)
-      return w.findResource(a.x, a.y, 'sugar', a.vision, a.memory, a.inventory.sugar)
+      return w.findResource(
+        a.x,
+        a.y,
+        'sugar',
+        a.vision,
+        a.memory,
+        a.inventory.sugar,
+      )
         ? a.values.survival * (1 + a.needs.hunger) * 4 * satiety
         : 0
     },
     canDo(a, w) {
       if (a.inventory.sugar >= CFG.SUGAR_CARRY_CAP) return false
-      return !!w.findResource(a.x, a.y, 'sugar', a.vision, a.memory, a.inventory.sugar)
+      return !!w.findResource(
+        a.x,
+        a.y,
+        'sugar',
+        a.vision,
+        a.memory,
+        a.inventory.sugar,
+      )
     },
     exec(a, w) {
-      const t = w.findResource(a.x, a.y, 'sugar', a.vision, a.memory, a.inventory.sugar)
+      const t = w.findResource(
+        a.x,
+        a.y,
+        'sugar',
+        a.vision,
+        a.memory,
+        a.inventory.sugar,
+      )
       if (!t) return false
       const s = getNextPathStep(w, a.x, a.y, t.x, t.y)
       w.move(a, s.x, s.y, {
@@ -215,7 +242,11 @@ export const IDEAS: Record<string, IdeaDef> = {
         const bonus = a.inventory.spade > 0 ? CFG.SPADE_BONUS : 1
         const remainCap = Math.max(0, CFG.SUGAR_CARRY_CAP - a.inventory.sugar)
         if (remainCap <= 0) return false
-        const got = Math.min(Math.floor(c.sugar), Math.ceil(1.5 * bonus), remainCap)
+        const got = Math.min(
+          Math.floor(c.sugar),
+          Math.ceil(1.5 * bonus),
+          remainCap,
+        )
         c.sugar = Math.max(0, c.sugar - got)
         a.inventory.sugar += got
         if (a.inventory.spade > 0) a.inventory.spade--
@@ -231,16 +262,37 @@ export const IDEAS: Record<string, IdeaDef> = {
     score(a, w) {
       if (a.inventory.wood >= CFG.WOOD_CARRY_CAP) return 0
       const hungerPenalty = clamp(1 - a.needs.hunger * 0.75, 0.2, 1)
-      return w.findResource(a.x, a.y, 'wood', a.vision, a.memory, a.inventory.wood)
+      return w.findResource(
+        a.x,
+        a.y,
+        'wood',
+        a.vision,
+        a.memory,
+        a.inventory.wood,
+      )
         ? a.values.building * 2.5 * hungerPenalty
         : 0
     },
     canDo(a, w) {
       if (a.inventory.wood >= CFG.WOOD_CARRY_CAP) return false
-      return !!w.findResource(a.x, a.y, 'wood', a.vision, a.memory, a.inventory.wood)
+      return !!w.findResource(
+        a.x,
+        a.y,
+        'wood',
+        a.vision,
+        a.memory,
+        a.inventory.wood,
+      )
     },
     exec(a, w) {
-      const t = w.findResource(a.x, a.y, 'wood', a.vision, a.memory, a.inventory.wood)
+      const t = w.findResource(
+        a.x,
+        a.y,
+        'wood',
+        a.vision,
+        a.memory,
+        a.inventory.wood,
+      )
       if (!t) return false
       const s = getNextPathStep(w, a.x, a.y, t.x, t.y)
       w.move(a, s.x, s.y)
@@ -249,7 +301,11 @@ export const IDEAS: Record<string, IdeaDef> = {
         const bonus = a.inventory.axe > 0 ? CFG.AXE_BONUS : 1
         const remainCap = Math.max(0, CFG.WOOD_CARRY_CAP - a.inventory.wood)
         if (remainCap <= 0) return false
-        const got = Math.min(Math.floor(c.wood), Math.ceil(1.5 * bonus), remainCap)
+        const got = Math.min(
+          Math.floor(c.wood),
+          Math.ceil(1.5 * bonus),
+          remainCap,
+        )
         c.wood = Math.max(0, c.wood - got)
         a.inventory.wood += got
         if (a.inventory.axe > 0) a.inventory.axe--
@@ -265,16 +321,37 @@ export const IDEAS: Record<string, IdeaDef> = {
     score(a, w) {
       if (a.inventory.metal >= CFG.METAL_CARRY_CAP) return 0
       const hungerPenalty = clamp(1 - a.needs.hunger * 0.75, 0.2, 1)
-      return w.findResource(a.x, a.y, 'metal', a.vision, a.memory, a.inventory.metal)
+      return w.findResource(
+        a.x,
+        a.y,
+        'metal',
+        a.vision,
+        a.memory,
+        a.inventory.metal,
+      )
         ? a.values.metal * 3.5 * hungerPenalty
         : 0
     },
     canDo(a, w) {
       if (a.inventory.metal >= CFG.METAL_CARRY_CAP) return false
-      return !!w.findResource(a.x, a.y, 'metal', a.vision, a.memory, a.inventory.metal)
+      return !!w.findResource(
+        a.x,
+        a.y,
+        'metal',
+        a.vision,
+        a.memory,
+        a.inventory.metal,
+      )
     },
     exec(a, w) {
-      const t = w.findResource(a.x, a.y, 'metal', a.vision, a.memory, a.inventory.metal)
+      const t = w.findResource(
+        a.x,
+        a.y,
+        'metal',
+        a.vision,
+        a.memory,
+        a.inventory.metal,
+      )
       if (!t) return false
       const s = getNextPathStep(w, a.x, a.y, t.x, t.y)
       w.move(a, s.x, s.y)
@@ -303,15 +380,36 @@ export const IDEAS: Record<string, IdeaDef> = {
     score(a, w) {
       const hungerPenalty = clamp(1 - a.needs.hunger * 0.8, 0.2, 1)
       const stockPenalty = clamp(1.25 - a.inventory.rock / 10, 0.3, 1.25)
-      return w.findResource(a.x, a.y, 'rock', a.vision, a.memory, a.inventory.rock)
+      return w.findResource(
+        a.x,
+        a.y,
+        'rock',
+        a.vision,
+        a.memory,
+        a.inventory.rock,
+      )
         ? a.values.building * 3.2 * hungerPenalty * stockPenalty
         : 0
     },
     canDo(a, w) {
-      return !!w.findResource(a.x, a.y, 'rock', a.vision, a.memory, a.inventory.rock)
+      return !!w.findResource(
+        a.x,
+        a.y,
+        'rock',
+        a.vision,
+        a.memory,
+        a.inventory.rock,
+      )
     },
     exec(a, w) {
-      const t = w.findResource(a.x, a.y, 'rock', a.vision, a.memory, a.inventory.rock)
+      const t = w.findResource(
+        a.x,
+        a.y,
+        'rock',
+        a.vision,
+        a.memory,
+        a.inventory.rock,
+      )
       if (!t) return false
       const s = getNextPathStep(w, a.x, a.y, t.x, t.y)
       w.move(a, s.x, s.y)
@@ -340,7 +438,14 @@ export const IDEAS: Record<string, IdeaDef> = {
       if (a.inventory.wood < CFG.SHELTER_WOOD) {
         // Not enough wood yet — score based on how badly we want a home,
         // filtered by: do we know where wood is?
-        const woodTarget = w.findResource(a.x, a.y, 'wood', a.vision, a.memory, a.inventory.wood)
+        const woodTarget = w.findResource(
+          a.x,
+          a.y,
+          'wood',
+          a.vision,
+          a.memory,
+          a.inventory.wood,
+        )
         return woodTarget
           ? a.values.building *
               4 *
@@ -382,7 +487,14 @@ export const IDEAS: Record<string, IdeaDef> = {
         return true
       }
       // Otherwise navigate to wood to gather more
-      const t = w.findResource(a.x, a.y, 'wood', a.vision, a.memory, a.inventory.wood)
+      const t = w.findResource(
+        a.x,
+        a.y,
+        'wood',
+        a.vision,
+        a.memory,
+        a.inventory.wood,
+      )
       if (!t) return false
       const s = getNextPathStep(w, a.x, a.y, t.x, t.y)
       w.move(a, s.x, s.y)
@@ -419,9 +531,17 @@ export const IDEAS: Record<string, IdeaDef> = {
     requires: ['CHOP_WOOD'],
     needsRes: null,
     score(a, _w) {
-      if (a.inventory.sugar < CFG.COOK_SUGAR) return 0
-      if (a.inventory.wood < CFG.COOK_WOOD) return 0
-      return a.values.survival * (2 + a.needs.hunger)
+      if (
+        a.inventory.sugar >= CFG.COOK_SUGAR &&
+        a.inventory.wood >= CFG.COOK_WOOD
+      ) {
+        return a.values.survival * (2 + a.needs.hunger)
+      }
+      // Recipe path: score positively so plan() can fire
+      if (a.ideas.has('HARVEST_SUGAR') && a.ideas.has('CHOP_WOOD')) {
+        return a.values.survival * (0.8 + a.needs.hunger * 0.4)
+      }
+      return 0
     },
     canDo(a, _w) {
       return (
@@ -433,6 +553,32 @@ export const IDEAS: Record<string, IdeaDef> = {
       a.inventory.wood -= CFG.COOK_WOOD
       a.inventory.cooked = (a.inventory.cooked || 0) + 2
       return true
+    },
+    plan(a, _w) {
+      const steps: PlanStep[] = []
+      if (a.inventory.sugar < CFG.COOK_SUGAR && a.ideas.has('HARVEST_SUGAR')) {
+        steps.push({
+          kind: 'GATHER_UNTIL',
+          label: 'gather sugar to cook',
+          ideaId: 'HARVEST_SUGAR',
+          resource: 'sugar',
+          targetTotal: CFG.COOK_SUGAR,
+          includeHomeInventory: false,
+        })
+      }
+      if (a.inventory.wood < CFG.COOK_WOOD && a.ideas.has('CHOP_WOOD')) {
+        steps.push({
+          kind: 'GATHER_UNTIL',
+          label: 'gather wood to cook',
+          ideaId: 'CHOP_WOOD',
+          resource: 'wood',
+          targetTotal: CFG.COOK_WOOD,
+          includeHomeInventory: false,
+        })
+      }
+      if (steps.length === 0) return null
+      steps.push({ kind: 'EXEC_IDEA', label: 'cook food', ideaId: 'COOK_FOOD' })
+      return { name: 'COOK_FOOD', steps }
     },
   },
 
@@ -466,16 +612,20 @@ export const IDEAS: Record<string, IdeaDef> = {
     needsRes: null,
     score(a, _w) {
       if (a.inventory.axe > 0) return 0
-      if (
-        a.inventory.wood < CFG.TOOL_WOOD ||
-        a.inventory.metal < CFG.TOOL_METAL
-      )
-        return 0
       const exploreBonus =
         a.inventory.sugar >= CFG.REPRO_MIN_SUGAR && a.needs.hunger < 0.65
           ? 1.15
           : 1
-      return a.values.building * 4 * exploreBonus
+      if (
+        a.inventory.wood >= CFG.TOOL_WOOD &&
+        a.inventory.metal >= CFG.TOOL_METAL
+      ) {
+        return a.values.building * 4 * exploreBonus
+      }
+      if (a.ideas.has('CHOP_WOOD') && a.ideas.has('DIG_METAL')) {
+        return a.values.building * 2 * exploreBonus
+      }
+      return 0
     },
     canDo(a, _w) {
       return (
@@ -490,6 +640,33 @@ export const IDEAS: Record<string, IdeaDef> = {
       a.inventory.axe = CFG.AXE_DUR
       return true
     },
+    plan(a, _w) {
+      if (a.inventory.axe > 0) return null
+      const steps: PlanStep[] = []
+      if (a.inventory.wood < CFG.TOOL_WOOD && a.ideas.has('CHOP_WOOD')) {
+        steps.push({
+          kind: 'GATHER_UNTIL',
+          label: 'gather wood for axe',
+          ideaId: 'CHOP_WOOD',
+          resource: 'wood',
+          targetTotal: CFG.TOOL_WOOD,
+          includeHomeInventory: false,
+        })
+      }
+      if (a.inventory.metal < CFG.TOOL_METAL && a.ideas.has('DIG_METAL')) {
+        steps.push({
+          kind: 'GATHER_UNTIL',
+          label: 'gather metal for axe',
+          ideaId: 'DIG_METAL',
+          resource: 'metal',
+          targetTotal: CFG.TOOL_METAL,
+          includeHomeInventory: false,
+        })
+      }
+      if (steps.length === 0) return null
+      steps.push({ kind: 'EXEC_IDEA', label: 'craft axe', ideaId: 'MAKE_AXE' })
+      return { name: 'MAKE_AXE', steps }
+    },
   },
 
   MAKE_SPADE: {
@@ -498,16 +675,20 @@ export const IDEAS: Record<string, IdeaDef> = {
     needsRes: null,
     score(a, _w) {
       if (a.inventory.spade > 0) return 0
-      if (
-        a.inventory.wood < CFG.TOOL_WOOD ||
-        a.inventory.metal < CFG.TOOL_METAL
-      )
-        return 0
       const exploreBonus =
         a.inventory.sugar >= CFG.REPRO_MIN_SUGAR && a.needs.hunger < 0.65
           ? 1.15
           : 1
-      return a.values.survival * 3 * exploreBonus
+      if (
+        a.inventory.wood >= CFG.TOOL_WOOD &&
+        a.inventory.metal >= CFG.TOOL_METAL
+      ) {
+        return a.values.survival * 3 * exploreBonus
+      }
+      if (a.ideas.has('CHOP_WOOD') && a.ideas.has('DIG_METAL')) {
+        return a.values.survival * 1.5 * exploreBonus
+      }
+      return 0
     },
     canDo(a, _w) {
       return (
@@ -522,6 +703,37 @@ export const IDEAS: Record<string, IdeaDef> = {
       a.inventory.spade = CFG.SPADE_DUR
       return true
     },
+    plan(a, _w) {
+      if (a.inventory.spade > 0) return null
+      const steps: PlanStep[] = []
+      if (a.inventory.wood < CFG.TOOL_WOOD && a.ideas.has('CHOP_WOOD')) {
+        steps.push({
+          kind: 'GATHER_UNTIL',
+          label: 'gather wood for spade',
+          ideaId: 'CHOP_WOOD',
+          resource: 'wood',
+          targetTotal: CFG.TOOL_WOOD,
+          includeHomeInventory: false,
+        })
+      }
+      if (a.inventory.metal < CFG.TOOL_METAL && a.ideas.has('DIG_METAL')) {
+        steps.push({
+          kind: 'GATHER_UNTIL',
+          label: 'gather metal for spade',
+          ideaId: 'DIG_METAL',
+          resource: 'metal',
+          targetTotal: CFG.TOOL_METAL,
+          includeHomeInventory: false,
+        })
+      }
+      if (steps.length === 0) return null
+      steps.push({
+        kind: 'EXEC_IDEA',
+        label: 'craft spade',
+        ideaId: 'MAKE_SPADE',
+      })
+      return { name: 'MAKE_SPADE', steps }
+    },
   },
 
   MAKE_PICKAXE: {
@@ -530,16 +742,20 @@ export const IDEAS: Record<string, IdeaDef> = {
     needsRes: null,
     score(a, _w) {
       if (a.inventory.pick > 0) return 0
-      if (
-        a.inventory.wood < CFG.TOOL_WOOD ||
-        a.inventory.metal < CFG.TOOL_METAL
-      )
-        return 0
       const exploreBonus =
         a.inventory.sugar >= CFG.REPRO_MIN_SUGAR && a.needs.hunger < 0.65
           ? 1.15
           : 1
-      return a.values.metal * 4 * exploreBonus
+      if (
+        a.inventory.wood >= CFG.TOOL_WOOD &&
+        a.inventory.metal >= CFG.TOOL_METAL
+      ) {
+        return a.values.metal * 4 * exploreBonus
+      }
+      if (a.ideas.has('CHOP_WOOD') && a.ideas.has('DIG_METAL')) {
+        return a.values.metal * 2 * exploreBonus
+      }
+      return 0
     },
     canDo(a, _w) {
       return (
@@ -553,6 +769,37 @@ export const IDEAS: Record<string, IdeaDef> = {
       a.inventory.metal -= CFG.TOOL_METAL
       a.inventory.pick = CFG.PICK_DUR
       return true
+    },
+    plan(a, _w) {
+      if (a.inventory.pick > 0) return null
+      const steps: PlanStep[] = []
+      if (a.inventory.wood < CFG.TOOL_WOOD && a.ideas.has('CHOP_WOOD')) {
+        steps.push({
+          kind: 'GATHER_UNTIL',
+          label: 'gather wood for pickaxe',
+          ideaId: 'CHOP_WOOD',
+          resource: 'wood',
+          targetTotal: CFG.TOOL_WOOD,
+          includeHomeInventory: false,
+        })
+      }
+      if (a.inventory.metal < CFG.TOOL_METAL && a.ideas.has('DIG_METAL')) {
+        steps.push({
+          kind: 'GATHER_UNTIL',
+          label: 'gather metal for pickaxe',
+          ideaId: 'DIG_METAL',
+          resource: 'metal',
+          targetTotal: CFG.TOOL_METAL,
+          includeHomeInventory: false,
+        })
+      }
+      if (steps.length === 0) return null
+      steps.push({
+        kind: 'EXEC_IDEA',
+        label: 'craft pickaxe',
+        ideaId: 'MAKE_PICKAXE',
+      })
+      return { name: 'MAKE_PICKAXE', steps }
     },
   },
 
@@ -628,10 +875,18 @@ export const IDEAS: Record<string, IdeaDef> = {
     score(a, w) {
       const home = getHomeShelterCell(a, w)
       if (!home || !a.homeCell) return 0
-      if (a.x !== a.homeCell.x || a.y !== a.homeCell.y) return 0
-      if (houseUpgradeWoodTotal(a, home) < CFG.HOUSE_WOOD) return 0
-      if (a.inventory.rock < CFG.HOUSE_ROCK) return 0
-      return a.values.building * 7
+      if (
+        a.x === a.homeCell.x &&
+        a.y === a.homeCell.y &&
+        houseUpgradeWoodTotal(a, home) >= CFG.HOUSE_WOOD &&
+        a.inventory.rock >= CFG.HOUSE_ROCK
+      ) {
+        return a.values.building * 7
+      }
+      if (a.ideas.has('CHOP_WOOD') && a.ideas.has('QUARRY_ROCK')) {
+        return a.values.building * 3.5
+      }
+      return 0
     },
     canDo(a, w) {
       const home = getHomeShelterCell(a, w)
@@ -663,6 +918,50 @@ export const IDEAS: Record<string, IdeaDef> = {
         inv: { sugar: 0, wood: 0, metal: 0, cooked: 0 },
       }
       return true
+    },
+    plan(a, w) {
+      if (!a.homeCell) return null
+      const home = getHomeShelterCell(a, w)
+      if (!home) return null
+      const steps: PlanStep[] = []
+      if (
+        houseUpgradeWoodTotal(a, home) < CFG.HOUSE_WOOD &&
+        a.ideas.has('CHOP_WOOD')
+      ) {
+        steps.push({
+          kind: 'GATHER_UNTIL',
+          label: 'gather wood for house upgrade',
+          ideaId: 'CHOP_WOOD',
+          resource: 'wood',
+          targetTotal: CFG.HOUSE_WOOD,
+          includeHomeInventory: true,
+        })
+      }
+      if (a.inventory.rock < CFG.HOUSE_ROCK && a.ideas.has('QUARRY_ROCK')) {
+        steps.push({
+          kind: 'GATHER_UNTIL',
+          label: 'gather rock for house upgrade',
+          ideaId: 'QUARRY_ROCK',
+          resource: 'rock',
+          targetTotal: CFG.HOUSE_ROCK,
+          includeHomeInventory: false,
+        })
+      }
+      if (a.x !== a.homeCell.x || a.y !== a.homeCell.y) {
+        steps.push({
+          kind: 'MOVE_TO',
+          label: 'return home to upgrade',
+          x: a.homeCell.x,
+          y: a.homeCell.y,
+        })
+      }
+      if (steps.length === 0) return null
+      steps.push({
+        kind: 'EXEC_IDEA',
+        label: 'upgrade shelter to house',
+        ideaId: 'BUILD_HOUSE',
+      })
+      return { name: 'BUILD_HOUSE', steps }
     },
   },
 }

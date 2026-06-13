@@ -72,7 +72,12 @@ function carryCapFor(type: ResourceType): number {
   return Number.POSITIVE_INFINITY
 }
 
-function edgeDensity(world: World, x: number, y: number, type: ResourceType): number {
+function edgeDensity(
+  world: World,
+  x: number,
+  y: number,
+  type: ResourceType,
+): number {
   let total = 0
   let n = 0
   for (let dy = -1; dy <= 1; dy++) {

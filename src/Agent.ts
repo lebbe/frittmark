@@ -1,18 +1,9 @@
 import { CFG } from './config'
 import { IDEAS, hasPrereqs } from './ideas'
 import {
-  createBuildRoadNetworkPlan,
   canFormPlanWithKnownIdeas,
-  createCookAndStorePlan,
-  createHouseUpgradePlan,
-  createHungerRecoveryPlan,
   createNavigateIdeaPlan,
-  createParentingProvisionPlan,
-  createRecoveryBufferPlan,
   createShelterStockpilePlan,
-  createStayIdlePlan,
-  createToolReadinessPlan,
-  createTradeRebalancePlan,
   isNearHome,
   resourceTotal,
   type AgentPlan,
@@ -607,67 +598,95 @@ export class Agent {
     return true
   }
 
-  _createHungerRecoveryPlan(world: WorldLike): boolean {
-    const nextPlan = createHungerRecoveryPlan(this, world)
-    if (!nextPlan) return false
-    this.plan = nextPlan
+  _emergencyForage(world: WorldLike): boolean {
+    if (
+      this.needs.hunger < CFG.HUNGER_NOFOOD_FORAGE ||
+      this.inventory.sugar > 0 ||
+      (this.inventory.cooked || 0) > 0
+    ) {
+      return false
+    }
+
+    const target = world.findResource(
+      this.x,
+      this.y,
+      'sugar',
+      this.vision,
+      this.memory,
+      this.inventory.sugar,
+    )
+    if (!target) return false
+
+    if (target.x === this.x && target.y === this.y) {
+      IDEAS.HARVEST_SUGAR.exec(this, world)
+      this.currentAction = 'HARVEST_SUGAR'
+    } else {
+      const s = getNextPathStep(world, this.x, this.y, target.x, target.y)
+      world.move(this, s.x, s.y)
+      this.currentAction = '-> HARVEST_SUGAR'
+    }
+    this.idleTicks = 0
     return true
   }
 
-  _createCookAndStorePlan(world: WorldLike): boolean {
-    const nextPlan = createCookAndStorePlan(this, world)
-    if (!nextPlan) return false
-    this.plan = nextPlan
-    return true
-  }
+  _chooseAndDoIdea(world: WorldLike): void {
+    let bestKey: IdeaId | null = null,
+      bestScore = -Infinity
+    for (const key of this.ideas) {
+      const idea = IDEAS[key]
+      if (!idea || idea.tier > 1) continue
+      let s = idea.score(this, world)
+      if (idea.tier === 1) s *= 1 + this.morals.patience * 0.35
+      if (s > bestScore) {
+        bestScore = s
+        bestKey = key
+      }
+    }
 
-  _createToolReadinessPlan(world: WorldLike): boolean {
-    const nextPlan = createToolReadinessPlan(this, world)
-    if (!nextPlan) return false
-    this.plan = nextPlan
-    return true
-  }
+    if (bestKey && bestScore > 0) {
+      const idea = IDEAS[bestKey]
 
-  _createTradeRebalancePlan(world: WorldLike): boolean {
-    const nextPlan = createTradeRebalancePlan(this, world)
-    if (!nextPlan) return false
-    this.plan = nextPlan
-    return true
-  }
-
-  _createRecoveryBufferPlan(world: WorldLike): boolean {
-    const nextPlan = createRecoveryBufferPlan(this, world)
-    if (!nextPlan) return false
-    this.plan = nextPlan
-    return true
-  }
-
-  _createHouseUpgradePlan(world: WorldLike): boolean {
-    const nextPlan = createHouseUpgradePlan(this, world)
-    if (!nextPlan) return false
-    this.plan = nextPlan
-    return true
-  }
-
-  _createParentingProvisionPlan(world: WorldLike): boolean {
-    const nextPlan = createParentingProvisionPlan(this, world)
-    if (!nextPlan) return false
-    this.plan = nextPlan
-    return true
-  }
-
-  _createStayIdlePlan(world: WorldLike): boolean {
-    const nextPlan = createStayIdlePlan(this, world)
-    if (!nextPlan) return false
-    this.plan = nextPlan
-    return true
-  }
-
-  _createBuildRoadNetworkPlan(world: WorldLike): boolean {
-    const nextPlan = createBuildRoadNetworkPlan(this, world)
-    if (!nextPlan) return false
-    this.plan = nextPlan
-    return true
+      if (idea.canDo(this, world)) {
+        idea.exec(this, world)
+        this.currentAction = bestKey
+        if (bestKey !== 'IDLE') this.idleTicks = 0
+        else this._tryDiscover(world)
+      } else {
+        // Let the idea own its own multi-step recipe first
+        const recipe = idea.plan?.(this, world)
+        if (recipe) {
+          this.plan = recipe
+          if (this._executePlan(world)) return
+        }
+        const res = idea.needsRes as ResourceType | null
+        if (res) {
+          const target = world.findResource(
+            this.x,
+            this.y,
+            res,
+            this.vision,
+            this.memory,
+            this.inventory[res],
+          )
+          if (target && (target.x !== this.x || target.y !== this.y)) {
+            this._createNavigateIdeaPlan(bestKey, target)
+            if (this._executePlan(world)) return
+          } else if (target && target.x === this.x && target.y === this.y) {
+            idea.exec(this, world)
+            this.currentAction = bestKey
+            this.idleTicks = 0
+            return
+          }
+        }
+        this.idleTicks++
+        this.currentAction = 'idle'
+        this._tryDiscover(world)
+      }
+    } else {
+      this.idleTicks++
+      this.currentAction = 'idle'
+      this._tryDiscover(world)
+    }
   }
 
   _executePlan(world: WorldLike): boolean {
@@ -724,9 +743,7 @@ export class Agent {
         idea.exec(this, world)
         this.currentAction = `PLAN:${this.plan.name} -> ${step.ideaId}`
         if (step.ideaId === 'IDLE') {
-          const discoverMult =
-            this.plan.name === 'STAY_IDLE' ? CFG.STAY_IDLE_DISCOVER_MULT : 1
-          this._tryDiscover(world, discoverMult)
+          this._tryDiscover(world)
         } else {
           this.idleTicks = 0
         }
@@ -785,7 +802,12 @@ export class Agent {
         if (!world.inBounds(x, y)) continue
         const c = world.cell(x, y)
         if (c.building) continue
-        if (c.sugarCap > 0 || c.woodCap > 0 || c.metalCap > 0 || c.rockCap > 0) {
+        if (
+          c.sugarCap > 0 ||
+          c.woodCap > 0 ||
+          c.metalCap > 0 ||
+          c.rockCap > 0
+        ) {
           this.memory.set(`${x},${y}`, {
             x,
             y,
@@ -815,48 +837,7 @@ export class Agent {
   _decideAndAct(world: WorldLike): void {
     if (this.plan && this._executePlan(world)) return
 
-    if (
-      !this.plan &&
-      this._createHungerRecoveryPlan(world) &&
-      this._executePlan(world)
-    ) {
-      return
-    }
-
-    if (
-      this.needs.hunger >= CFG.HUNGER_NOFOOD_FORAGE &&
-      this.inventory.sugar <= 0 &&
-      (this.inventory.cooked || 0) <= 0
-    ) {
-      const target = world.findResource(
-        this.x,
-        this.y,
-        'sugar',
-        this.vision,
-        this.memory,
-        this.inventory.sugar,
-      )
-      if (target) {
-        if (target.x === this.x && target.y === this.y) {
-          IDEAS.HARVEST_SUGAR.exec(this, world)
-          this.currentAction = 'HARVEST_SUGAR'
-        } else {
-          const s = getNextPathStep(world, this.x, this.y, target.x, target.y)
-          world.move(this, s.x, s.y)
-          this.currentAction = '-> HARVEST_SUGAR'
-        }
-        this.idleTicks = 0
-        return
-      }
-    }
-
-    if (
-      !this.plan &&
-      this._createParentingProvisionPlan(world) &&
-      this._executePlan(world)
-    ) {
-      return
-    }
+    if (this._emergencyForage(world)) return
 
     if (
       !this.plan &&
@@ -866,113 +847,7 @@ export class Agent {
       return
     }
 
-    if (
-      !this.plan &&
-      this._createCookAndStorePlan(world) &&
-      this._executePlan(world)
-    ) {
-      return
-    }
-
-    if (
-      !this.plan &&
-      this._createToolReadinessPlan(world) &&
-      this._executePlan(world)
-    ) {
-      return
-    }
-
-    if (
-      !this.plan &&
-      this._createTradeRebalancePlan(world) &&
-      this._executePlan(world)
-    ) {
-      return
-    }
-
-    if (
-      !this.plan &&
-      this._createStayIdlePlan(world) &&
-      this._executePlan(world)
-    ) {
-      return
-    }
-
-    if (
-      !this.plan &&
-      this._createRecoveryBufferPlan(world) &&
-      this._executePlan(world)
-    ) {
-      return
-    }
-
-    if (
-      !this.plan &&
-      this._createHouseUpgradePlan(world) &&
-      this._executePlan(world)
-    ) {
-      return
-    }
-
-    if (
-      !this.plan &&
-      this._createBuildRoadNetworkPlan(world) &&
-      this._executePlan(world)
-    ) {
-      return
-    }
-
-    let bestKey: IdeaId | null = null,
-      bestScore = -Infinity
-    for (const key of this.ideas) {
-      const idea = IDEAS[key]
-      if (!idea || idea.tier > 1) continue
-      let s = idea.score(this, world)
-      if (idea.tier === 1) s *= 1 + this.morals.patience * 0.35
-      if (s > bestScore) {
-        bestScore = s
-        bestKey = key
-      }
-    }
-
-    if (bestKey && bestScore > 0) {
-      const idea = IDEAS[bestKey]
-
-      if (idea.canDo(this, world)) {
-        idea.exec(this, world)
-        this.currentAction = bestKey
-        if (bestKey !== 'IDLE') this.idleTicks = 0
-        else this._tryDiscover(world)
-      } else {
-        const res = idea.needsRes as ResourceType | null
-        if (res) {
-          const target = world.findResource(
-            this.x,
-            this.y,
-            res,
-            this.vision,
-            this.memory,
-            this.inventory[res],
-          )
-          if (target && (target.x !== this.x || target.y !== this.y)) {
-            this._createNavigateIdeaPlan(bestKey, target)
-            if (this._executePlan(world)) return
-          } else if (target && target.x === this.x && target.y === this.y) {
-            idea.exec(this, world)
-            this.currentAction = bestKey
-            this.idleTicks = 0
-            return
-          }
-        }
-        this.idleTicks++
-        this.currentAction = 'idle'
-        this._tryDiscover(world)
-      }
-    } else {
-      this.idleTicks++
-      this.currentAction = 'idle'
-      this._tryDiscover(world)
-    }
+    this._chooseAndDoIdea(world)
   }
 
   _tryDiscover(world: WorldLike, chanceMult = 1): void {
