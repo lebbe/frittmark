@@ -6,6 +6,8 @@ Frittmark is a browser-based agent simulation that explores how voluntary exchan
 
 The simulation is implemented as a modular TypeScript project (`src/*`) and runs in the browser via Vite.
 
+![Screenshot of the simulation](game.webp)
+
 ---
 
 ## Background and Motivation
@@ -190,23 +192,23 @@ Each tick, a non-toddler agent scores every idea in its current `ideas` Set. Ide
 
 ### Idea Catalogue
 
-| Idea            | Tier | Requires             | Description                                                                                                                                          |
-| --------------- | ---- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EAT_SUGAR`     | 0    | —                    | Consume 1 raw sugar from inventory; restore 35% hunger                                                                                               |
-| `HARVEST_SUGAR` | 0    | —                    | Navigate to and harvest sugar; spade doubles yield                                                                                                   |
-| `CHOP_WOOD`     | 0    | —                    | Navigate to and harvest wood; axe doubles yield                                                                                                      |
-| `DIG_METAL`     | 0    | —                    | Navigate to and harvest metal; pickaxe doubles yield; stops at carried metal cap                                                                     |
-| `QUARRY_ROCK`   | 0    | —                    | Navigate to and harvest rock                                                                                                                           |
-| `BUILD_SHELTER` | 0    | CHOP_WOOD            | Build a 3-capacity shelter for 4 wood, or navigate to gather wood toward that goal                                                                   |
-| `IDLE`          | 0    | —                    | Do nothing; increment idle counter (enables idea discovery)                                                                                          |
-| `COOK_FOOD`     | 1    | CHOP_WOOD            | Convert 2 sugar + 1 wood into 2 cooked food units                                                                                                    |
-| `EAT_COOKED`    | 1    | COOK_FOOD            | Consume 1 cooked food; restore 80% hunger (auto-granted with COOK_FOOD)                                                                              |
-| `MAKE_AXE`      | 1    | CHOP_WOOD, DIG_METAL | Craft an axe (50 uses) from 2 wood + 1 metal                                                                                                         |
-| `MAKE_SPADE`    | 1    | CHOP_WOOD, DIG_METAL | Craft a spade (50 uses) from 2 wood + 1 metal                                                                                                        |
-| `MAKE_PICKAXE`  | 1    | CHOP_WOOD, DIG_METAL | Craft a pickaxe (50 uses) from 2 wood + 1 metal                                                                                                      |
-| `UPGRADE_TO_STONE_ROAD` | 1 | QUARRY_ROCK, BUILD_SHELTER | Upgrade current dirt path cell into stone road (requires carried rock)                                                                              |
-| `TRADE`         | 1    | COOK_FOOD            | Attempt bilateral voluntary exchange with a nearby agent; also shares full location memory                                                           |
-| `BUILD_HOUSE`   | 2    | BUILD_SHELTER        | Upgrade a completed owned shelter into a house at the same tile, consuming wood (carried + stored) and rock                                         |
+| Idea                    | Tier | Requires                   | Description                                                                                                 |
+| ----------------------- | ---- | -------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `EAT_SUGAR`             | 0    | —                          | Consume 1 raw sugar from inventory; restore 35% hunger                                                      |
+| `HARVEST_SUGAR`         | 0    | —                          | Navigate to and harvest sugar; spade doubles yield                                                          |
+| `CHOP_WOOD`             | 0    | —                          | Navigate to and harvest wood; axe doubles yield                                                             |
+| `DIG_METAL`             | 0    | —                          | Navigate to and harvest metal; pickaxe doubles yield; stops at carried metal cap                            |
+| `QUARRY_ROCK`           | 0    | —                          | Navigate to and harvest rock                                                                                |
+| `BUILD_SHELTER`         | 0    | CHOP_WOOD                  | Build a 3-capacity shelter for 4 wood, or navigate to gather wood toward that goal                          |
+| `IDLE`                  | 0    | —                          | Do nothing; increment idle counter (enables idea discovery)                                                 |
+| `COOK_FOOD`             | 1    | CHOP_WOOD                  | Convert 2 sugar + 1 wood into 2 cooked food units                                                           |
+| `EAT_COOKED`            | 1    | COOK_FOOD                  | Consume 1 cooked food; restore 80% hunger (auto-granted with COOK_FOOD)                                     |
+| `MAKE_AXE`              | 1    | CHOP_WOOD, DIG_METAL       | Craft an axe (50 uses) from 2 wood + 1 metal                                                                |
+| `MAKE_SPADE`            | 1    | CHOP_WOOD, DIG_METAL       | Craft a spade (50 uses) from 2 wood + 1 metal                                                               |
+| `MAKE_PICKAXE`          | 1    | CHOP_WOOD, DIG_METAL       | Craft a pickaxe (50 uses) from 2 wood + 1 metal                                                             |
+| `UPGRADE_TO_STONE_ROAD` | 1    | QUARRY_ROCK, BUILD_SHELTER | Upgrade current dirt path cell into stone road (requires carried rock)                                      |
+| `TRADE`                 | 1    | COOK_FOOD                  | Attempt bilateral voluntary exchange with a nearby agent; also shares full location memory                  |
+| `BUILD_HOUSE`           | 2    | BUILD_SHELTER              | Upgrade a completed owned shelter into a house at the same tile, consuming wood (carried + stored) and rock |
 
 ### `BUILD_SHELTER` as Tier 0
 
@@ -222,7 +224,7 @@ Recent balancing changes were intentionally minimal and targeted:
 - **Carry-limited harvesting is active.** Sugar, wood, metal, and rock targeting and harvesting are constrained by per-resource carried caps.
 - **Emergency no-food behavior is active.** At high hunger with no carried sugar/cooked food, agents override normal planning and forage sugar immediately.
 - **Building terrain is constrained.** New shelters require valid building plots (forest or empty, never sugar terrain). `BUILD_HOUSE` upgrades an existing completed shelter.
-- **Route system is active.** Weighted A* pathfinding, emergent dirt paths, stone roads, and degradation by inactivity/traversal are implemented.
+- **Route system is active.** Weighted A\* pathfinding, emergent dirt paths, stone roads, and degradation by inactivity/traversal are implemented.
 - **A small exploration/build nudge is applied.** Non-desperate agents with sugar reserves get a modest multiplier on building/non-food craft scores, encouraging progression out of sugar-only loops.
 - **Shelter economy is active.** Agents auto-join nearby shelters when single, can deposit/withdraw shared shelter inventory, and run stockpile plans that gather sugar/wood/metal for home stores. Carried food spoils faster than stored food, eating while sheltered gives a comfort bonus, and agents with completed home assignment get slower carried-food spoilage than unsheltered agents.
 
