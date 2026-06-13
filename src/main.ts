@@ -16,6 +16,12 @@ import {
   toggleIdea,
   updateUI,
 } from './gui.ts'
+import {
+  applyPersistedCfgOverrides,
+  CONFIG_MODAL_HTML,
+  initConfigModal,
+} from './ConfigModal'
+import { CFG } from './config'
 import { Renderer } from './Renderer'
 import { Simulation } from './Simulation'
 import './style.css'
@@ -34,6 +40,10 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
       <button class="btn on" id="btn-play">▶ Play</button>
       <button class="btn" id="btn-pause">⏸ Pause</button>
       <button class="btn" id="btn-step">⏭ Step</button>
+    </div>
+    <div class="btn-row">
+      <button class="btn" id="btn-restart">↺ Restart</button>
+      <button class="btn" id="btn-config">⚙ Run Config</button>
     </div>
     <div class="slider-wrap">
       <div class="slider-labels"><span>Tick speed</span><span id="speed-val">1000ms</span></div>
@@ -133,6 +143,8 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     </div>
   </div>
 </div>
+
+${CONFIG_MODAL_HTML}
 `
 
 // ================================================================
@@ -142,12 +154,14 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 // ---- Bootstrap ----
 
 window.addEventListener('DOMContentLoaded', () => {
-  const sim = new Simulation()
+  applyPersistedCfgOverrides()
+
+  let sim = new Simulation()
   const canvas = document.getElementById(
     'world-canvas',
   ) as HTMLCanvasElement | null
   if (!canvas) throw new Error('Missing #world-canvas')
-  const renderer = new Renderer(canvas, sim.world)
+  let renderer = new Renderer(canvas, sim.world)
   initGUI(sim, renderer)
   renderer.draw()
   updateUI()
@@ -163,9 +177,31 @@ window.addEventListener('DOMContentLoaded', () => {
   btnPause.addEventListener('click', pause)
   btnStep.addEventListener('click', step)
 
+  const restartRun = (): void => {
+    const wasRunning = isRunning()
+    pause()
+    closeModal()
+    closeHouseModal()
+    sim = new Simulation()
+    renderer = new Renderer(canvas, sim.world)
+    initGUI(sim, renderer)
+    renderer.draw()
+    updateUI()
+    if (wasRunning) play()
+  }
+
+  const btnRestart = document.getElementById('btn-restart')
+  if (!btnRestart) throw new Error('Missing #btn-restart')
+  btnRestart.addEventListener('click', restartRun)
+
+  initConfigModal({ onRestart: restartRun })
+
   const sl = document.getElementById('speed-slider') as HTMLInputElement | null
   const speedVal = document.getElementById('speed-val')
   if (!sl || !speedVal) throw new Error('Missing speed controls')
+  sl.value = String(CFG.DEFAULT_TICK_MS)
+  speedVal.textContent = `${CFG.DEFAULT_TICK_MS}ms`
+  setTickMs(CFG.DEFAULT_TICK_MS)
   sl.addEventListener('input', () => {
     const tickMs = Number(sl.value)
     setTickMs(tickMs)

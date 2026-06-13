@@ -45,12 +45,13 @@ The code is organised into modular TypeScript files in `src/`.
 1. CONFIG      — all tuning parameters in one object (CFG)
 2. UTILS       — pure helper functions
 3. WORLD       — grid, cells, resource generation and regeneration
-4. IDEAS       — the strategy registry; each idea is fully self-contained
-5. PLANNING    — plan types + plan builders (navigation, stockpiling, rest)
-6. AGENT       — agent class: values, needs, morals, memory, plan execution
-7. SIMULATION  — tick engine, birth and death management
-8. RENDERER    — canvas drawing
-9. GUI         — controls, statistics panel, agent inspector modal
+4. IDEAS       — strategy registry; each idea is self-contained
+5. PLANNING    — plan types + plan builders
+6. AGENT       — values, needs, morals, memory, decision + plan execution
+7. PATHS       — weighted pathfinding, route typing, wear/decay rules
+8. SIMULATION  — tick engine, birth and death management
+9. RENDERER    — canvas drawing
+10. GUI        — controls, statistics panel, agent/house inspector modals
 ```
 
 ---
@@ -59,70 +60,26 @@ The code is organised into modular TypeScript files in `src/`.
 
 All magic numbers live in a single `CFG` object so they can be found and changed in one place. The simulation reads from `CFG` throughout; nothing is hardcoded anywhere else.
 
-### Full Configuration Reference
+### Configuration Reference
 
-| Key                           | Default | Description                                                         |
-| ----------------------------- | ------- | ------------------------------------------------------------------- |
-| `GRID_W`                      | `100`   | Grid width in cells                                                 |
-| `GRID_H`                      | `100`   | Grid height in cells                                                |
-| `CELL_PX`                     | `7`     | Pixels per cell                                                     |
-| `SUGAR_MAX`                   | `10`    | Maximum sugar capacity per cell                                     |
-| `WOOD_MAX`                    | `8`     | Maximum wood capacity per cell                                      |
-| `METAL_MAX`                   | `5`     | Maximum metal capacity per cell                                     |
-| `SUGAR_REGEN`                 | `0.25`  | Sugar regenerated per tick per cell                                 |
-| `WOOD_REGEN`                  | `0.08`  | Wood regenerated per tick per cell                                  |
-| `METAL_REGEN`                 | `0.025` | Metal regenerated per tick per cell                                 |
-| `INITIAL_AGENTS`              | `80`    | Agents spawned at simulation start                                  |
-| `POP_CAP`                     | `4000`  | Soft population ceiling; no reproduction above this                 |
-| `HUNGER_PER_TICK`             | `0.035` | Base hunger increase per tick (scaled by metabolism)                |
-| `HUNGER_DEATH`                | `1.0`   | Hunger level at which agent dies                                    |
-| `MAX_AGE`                     | `700`   | Maximum lifespan in ticks                                           |
-| `VISION_MIN/MAX`              | `1 / 6` | Heritable trait range (cells of sight radius)                       |
-| `METABOLISM_MIN/MAX`          | `1 / 4` | Heritable trait range (hunger multiplier)                           |
-| `SUGAR_EAT_RESTORE`           | `0.35`  | Hunger reduction from eating 1 raw sugar                            |
-| `COOKED_EAT_RESTORE`          | `0.80`  | Hunger reduction from eating 1 cooked food                          |
-| `SHELTER_EAT_BONUS`           | `1.25`  | Extra hunger restoration multiplier when eating near shelter        |
-| `CARRIED_SUGAR_SPOIL_CHANCE`  | `0.03`  | Per-tick spoilage chance for carried sugar                          |
-| `CARRIED_COOKED_SPOIL_CHANCE` | `0.04`  | Per-tick spoilage chance for carried cooked food                    |
-| `SHELTER_CARRIED_SPOIL_MULT`  | `0.45`  | Carried-food spoilage multiplier for agents with completed home     |
-| `STORED_SUGAR_SPOIL_CHANCE`   | `0.01`  | Per-tick spoilage chance for stored sugar                           |
-| `STORED_COOKED_SPOIL_CHANCE`  | `0.015` | Per-tick spoilage chance for stored cooked food                     |
-| `METAL_CARRY_CAP`             | `1.5`   | Maximum carried metal per agent                                     |
-| `HUNGER_NOFOOD_FORAGE`        | `0.72`  | Hunger threshold for emergency sugar-forage when inventory is empty |
-| `COOK_SUGAR`                  | `2`     | Sugar cost to cook one batch                                        |
-| `COOK_WOOD`                   | `1`     | Wood cost to cook one batch                                         |
-| `AXE_DUR`                     | `50`    | Axe uses before breaking                                            |
-| `SPADE_DUR`                   | `50`    | Spade uses before breaking                                          |
-| `PICK_DUR`                    | `50`    | Pickaxe uses before breaking                                        |
-| `AXE_BONUS`                   | `2.0`   | Wood harvest multiplier when holding axe                            |
-| `SPADE_BONUS`                 | `2.0`   | Sugar harvest multiplier when holding spade                         |
-| `PICK_BONUS`                  | `2.0`   | Metal harvest multiplier when holding pickaxe                       |
-| `TOOL_WOOD`                   | `2`     | Wood cost for any tool                                              |
-| `TOOL_METAL`                  | `1`     | Metal cost for any tool                                             |
-| `SHELTER_WOOD`                | `4`     | Wood needed to build a shelter                                      |
-| `SHELTER_BUILD`               | `6`     | Ticks to complete a shelter                                         |
-| `SHELTER_CAP`                 | `3`     | Maximum resident capacity                                           |
-| `HOUSE_WOOD`                  | `8`     | Total wood needed to build a house                                  |
-| `HOUSE_BUILD`                 | `16`    | Ticks to complete a house                                           |
-| `HOUSE_CAP`                   | `5`     | Maximum resident capacity                                           |
-| `REPRO_MIN_SUGAR`             | `5`     | Minimum sugar both agents must hold to reproduce                    |
-| `REPRO_COOLDOWN`              | `60`    | Ticks before an agent can reproduce again                           |
-| `AGE_TODDLER`                 | `20`    | Ticks in toddler phase                                              |
-| `AGE_CHILD`                   | `60`    | Ticks in child phase                                                |
-| `AGE_YOUTH`                   | `120`   | Ticks in youth phase                                                |
-| `IDLE_THRESHOLD`              | `1`     | Consecutive idle ticks before idea discovery can trigger            |
-| `DISCOVER_CHANCE`             | `0.08`  | Base probability of discovering a new idea per idle check           |
-| `SPREAD_CHANCE`               | `0.03`  | Base probability of learning an idea from a nearby agent            |
-| `MEM_SHARE_CHANCE`            | `0.12`  | Per-tick probability of sharing memory with a nearby agent          |
-| `MEM_CAP`                     | `200`   | Maximum memory entries per agent                                    |
-| `TRADE_RANGE`                 | `2`     | Manhattan distance within which trading can occur                   |
-| `DEFAULT_TICK_MS`             | `1`     | Default milliseconds between ticks                                  |
-| `HUNGER_PAUSE_PLAN`           | `0.6`   | Hunger threshold where agents pause plans to eat from inventory     |
-| `HUNGER_ABORT_PLAN_NOFOOD`    | `0.72`  | Hunger threshold where plans abort if no edible inventory exists    |
-| `PLAN_RECONSIDER_MAX_CHANCE`  | `0.08`  | Max per-tick chance low-integrity agents abandon current plan       |
-| `STAY_IDLE_MAX_HUNGER`        | `0.4`   | Max hunger to enter the stay-idle plan                              |
-| `STAY_IDLE_PLAN_TICKS`        | `6`     | Number of idle-execution steps in a stay-idle plan                  |
-| `STAY_IDLE_DISCOVER_MULT`     | `2.25`  | Discovery/spread multiplier while executing stay-idle plan          |
+Canonical source of truth is `src/config.ts`.
+
+The current config covers these groups:
+
+- World/resource generation: sugar/wood/metal/rock maxima and regen rates.
+- Agent physiology and lifecycle: hunger, age phase thresholds, reproduction gating.
+- Carry limits: `SUGAR_CARRY_CAP`, `WOOD_CARRY_CAP`, `METAL_CARRY_CAP`, `ROCK_CARRY_CAP`.
+- Crafting/building economy: tool durability/bonuses, shelter and house costs.
+- Movement and routes:
+  - weighted terrain costs (`MOVE_COST_*`)
+  - route multipliers (`MOVE_MULT_DIRT_PATH`, `MOVE_MULT_STONE_ROAD`)
+  - wear and decay thresholds (`TRAIL_*`)
+  - inactivity and traversal degradation (`PATH_UNUSED_TO_REMOVE_TICKS`, `ROAD_UNUSED_TO_PATH_TICKS`, `ROAD_TRAVERSE_TO_PATH_THRESHOLD`)
+  - pathfinder budget (`PATH_MAX_SEARCH_NODES`)
+- Resource targeting behavior:
+  - entry-cost weighting (`RESOURCE_TARGET_ENTRY_COST_WEIGHT`)
+  - edge bias weighting (`RESOURCE_TARGET_EDGE_BIAS_WEIGHT`)
+- Planning/discovery/trade tuning: hunger pause/abort thresholds, discovery/spread, trade range, idle multipliers.
 
 ---
 
@@ -160,6 +117,13 @@ The world is a flat 100×100 grid stored as a single array of cell objects, inde
   woodCap:  number,
   metal:    number,
   metalCap: number,
+  rock:     number,
+  rockCap:  number,
+  path:     boolean, // legacy compatibility for stone_road
+  routeType:'none' | 'dirt_path' | 'stone_road',
+  trailWear:number,
+  ticksSinceTraversal:number,
+  roadTraversals:number,
   building: null | BuildingObject
 }
 ```
@@ -178,13 +142,18 @@ Resources are placed procedurally at construction time using overlapping radial 
 
 Each tick, resources regenerate fractionally up to their cell capacity. Cells occupied by buildings do not regenerate (the structure suppresses the ground). Fractional values accumulate across ticks; a cell with capacity 10 and regen rate 0.25 fully regenerates in 40 ticks.
 
-### `findResource(ax, ay, type, vision, agentMemory)`
+### `findResource(ax, ay, type, vision, agentMemory, carriedAmount)`
 
-This is the central spatial query function used by all harvesting ideas. It operates in two phases:
+This is the central spatial query function used by harvesting and navigation. It operates in two phases:
 
-**Phase 1 — Vision scan:** All cells within a square of radius `vision` around `(ax, ay)` are checked. Building cells are skipped. The cell with the highest current resource amount above a floor of 0.5 is returned immediately.
+**Phase 1 — Vision scan:** All cells within a square of radius `vision` around `(ax, ay)` are checked. Building cells are skipped. Score is based on:
 
-**Phase 2 — Memory fallback:** If vision returns nothing, the agent's memory map is searched for entries of the requested type. Each entry is scored as `amount / (distance + 1)`, balancing richness against travel cost. The highest-scoring entry is returned as a navigation target.
+- effective yield capped by remaining carry capacity
+- distance from agent
+- entry terrain cost
+- local density edge bias (to prefer edge harvesting over deep-core penetration)
+
+**Phase 2 — Memory fallback:** If vision returns nothing, memory entries are scored with carry-cap clamping and distance weighting, then the best entry is returned.
 
 This two-phase design is what allows agents to pursue known resource locations outside their immediate vision, producing long-range goal-directed movement.
 
@@ -226,7 +195,8 @@ Each tick, a non-toddler agent scores every idea in its current `ideas` Set. Ide
 | `EAT_SUGAR`     | 0    | —                    | Consume 1 raw sugar from inventory; restore 35% hunger                                                                                               |
 | `HARVEST_SUGAR` | 0    | —                    | Navigate to and harvest sugar; spade doubles yield                                                                                                   |
 | `CHOP_WOOD`     | 0    | —                    | Navigate to and harvest wood; axe doubles yield                                                                                                      |
-| `DIG_METAL`     | 0    | —                    | Navigate to and harvest metal; pickaxe doubles yield                                                                                                 |
+| `DIG_METAL`     | 0    | —                    | Navigate to and harvest metal; pickaxe doubles yield; stops at carried metal cap                                                                     |
+| `QUARRY_ROCK`   | 0    | —                    | Navigate to and harvest rock                                                                                                                           |
 | `BUILD_SHELTER` | 0    | CHOP_WOOD            | Build a 3-capacity shelter for 4 wood, or navigate to gather wood toward that goal                                                                   |
 | `IDLE`          | 0    | —                    | Do nothing; increment idle counter (enables idea discovery)                                                                                          |
 | `COOK_FOOD`     | 1    | CHOP_WOOD            | Convert 2 sugar + 1 wood into 2 cooked food units                                                                                                    |
@@ -234,8 +204,9 @@ Each tick, a non-toddler agent scores every idea in its current `ideas` Set. Ide
 | `MAKE_AXE`      | 1    | CHOP_WOOD, DIG_METAL | Craft an axe (50 uses) from 2 wood + 1 metal                                                                                                         |
 | `MAKE_SPADE`    | 1    | CHOP_WOOD, DIG_METAL | Craft a spade (50 uses) from 2 wood + 1 metal                                                                                                        |
 | `MAKE_PICKAXE`  | 1    | CHOP_WOOD, DIG_METAL | Craft a pickaxe (50 uses) from 2 wood + 1 metal                                                                                                      |
+| `UPGRADE_TO_STONE_ROAD` | 1 | QUARRY_ROCK, BUILD_SHELTER | Upgrade current dirt path cell into stone road (requires carried rock)                                                                              |
 | `TRADE`         | 1    | COOK_FOOD            | Attempt bilateral voluntary exchange with a nearby agent; also shares full location memory                                                           |
-| `BUILD_HOUSE`   | 2    | BUILD_SHELTER        | Collaborative construction (requires partner) on wood/empty terrain only; sugar/metal cells are invalid even when depleted; 5-capacity, 8 wood total |
+| `BUILD_HOUSE`   | 2    | BUILD_SHELTER        | Upgrade a completed owned shelter into a house at the same tile, consuming wood (carried + stored) and rock                                         |
 
 ### `BUILD_SHELTER` as Tier 0
 
@@ -248,9 +219,10 @@ Recent balancing changes were intentionally minimal and targeted:
 - **Reproduction is now shelter-gated.** Agents can reproduce only when they are adults with sugar and cooldown eligibility, and each is in or next to a completed shelter.
 - **Sugar harvesting now includes satiety damping.** `HARVEST_SUGAR` score is multiplied by a clamp-based satiety factor, reducing sugar over-focus when inventory is already stocked.
 - **Wood/metal gathering now use soft hunger penalties.** `CHOP_WOOD` and `DIG_METAL` no longer hard-stop at hunger thresholds; instead, score scales down smoothly with hunger.
-- **Metal hoarding is capped.** Agents stop digging metal once carried metal reaches `METAL_CARRY_CAP`.
+- **Carry-limited harvesting is active.** Sugar, wood, metal, and rock targeting and harvesting are constrained by per-resource carried caps.
 - **Emergency no-food behavior is active.** At high hunger with no carried sugar/cooked food, agents override normal planning and forage sugar immediately.
-- **House terrain is constrained.** `BUILD_HOUSE` cannot execute on sugar or metal terrain, including depleted sugar/metal cells; valid plots are wood or empty cells.
+- **Building terrain is constrained.** New shelters require valid building plots (forest or empty, never sugar terrain). `BUILD_HOUSE` upgrades an existing completed shelter.
+- **Route system is active.** Weighted A* pathfinding, emergent dirt paths, stone roads, and degradation by inactivity/traversal are implemented.
 - **A small exploration/build nudge is applied.** Non-desperate agents with sugar reserves get a modest multiplier on building/non-food craft scores, encouraging progression out of sugar-only loops.
 - **Shelter economy is active.** Agents auto-join nearby shelters when single, can deposit/withdraw shared shelter inventory, and run stockpile plans that gather sugar/wood/metal for home stores. Carried food spoils faster than stored food, eating while sheltered gives a comfort bonus, and agents with completed home assignment get slower carried-food spoilage than unsheltered agents.
 
@@ -481,13 +453,14 @@ The renderer draws the world onto an HTML Canvas element sized to `GRID_W × CEL
 
 Each tick, the renderer builds an agent position map (`Map<cellIndex, Agent[]>`) in O(n) over agents, then iterates all cells in row-major order.
 
-**Ground cells:** The dominant resource (highest current value above a floor of 0.4) determines the cell colour. Each resource has a base RGB triple; the cell colour is linearly interpolated between the background colour `(13, 13, 13)` and the resource colour, using `amount / maxCapacity` as the blend parameter. A cell at 30% of its sugar capacity is 30% of the way between background and full gold. Empty cells render as near-black.
+**Ground cells:** Route type is rendered first (stone road or dirt path). Otherwise, dominant resource (highest current value above a floor of 0.4) determines the cell colour. Each resource has a base RGB triple; the cell colour is linearly interpolated between background and resource colour by relative amount.
 
 | Resource | Colour                            |
 | -------- | --------------------------------- |
 | Sugar    | `rgb(200, 160, 30)` — gold        |
 | Wood     | `rgb(50, 105, 60)` — forest green |
 | Metal    | `rgb(75, 115, 140)` — steel blue  |
+| Rock     | `rgb(110, 110, 110)` — stone grey |
 
 **Building cells:** Rendered with a very dark brown background and a border whose colour indicates type (shelter: `#7a3515`, house: `#ff9030`) and construction state (dim grey if under construction). Incomplete buildings display a thin progress bar at the bottom of the cell.
 
@@ -523,7 +496,7 @@ Updated every tick:
 - Gini coefficient (0.000 – 1.000)
 - Cumulative births and deaths
 - Complete shelters and houses
-- Total inventory across all living agents (sugar, wood, metal, cooked food)
+- Total inventory across all living agents (dynamic across all inventory keys)
 
 ### Idea Registry (collapsible)
 
@@ -548,7 +521,7 @@ The modal is divided into five sections:
 
 **Morals:** All four morals as labelled progress bars (teal).
 
-**Inventory:** All seven inventory slots (sugar, wood, metal, cooked food, axe durability, spade durability, pickaxe durability) with `−` and `+` buttons for direct debug modification. Clicking `+` on sugar and then stepping the simulation to observe how a starving agent's behaviour changes is the intended workflow.
+**Inventory:** All known inventory slots (including rock and tools) are shown in a stable order with `−` and `+` debug buttons.
 
 **Ideas:** All ideas in the registry listed with tier badge, known/unknown state (✓ green / ○ learnable / · prerequisites missing), and action buttons. Known Tier 1+ ideas can be removed. Unknown ideas with prerequisites met can be granted. Unknown ideas without prerequisites are shown greyed out with the missing prerequisites listed in a tooltip.
 
@@ -603,7 +576,7 @@ This field tells the navigation planner what resource to seek when `canDo` retur
 
 ## Known Limitations and Design Choices
 
-**Zero movement cost.** Moving one cell costs the same as staying put: nothing. A more realistic model would deduct metabolic cost proportional to movement, making long-range trade routes genuinely expensive and short-range exchange more valuable. This is planned for a future version.
+**No explicit energy burn per move.** Movement now has weighted traversal time/cost for routing, but hunger does not yet increase directly as a function of distance traveled.
 
 **Memory never expires (only updates).** An agent heading for a wood patch that was depleted last tick will find it empty and update their memory correctly — but they wasted travel time. A time-weighted confidence score on memory entries would improve navigation efficiency but adds complexity.
 
@@ -627,7 +600,7 @@ This field tells the navigation planner what resource to seek when `canDo` retur
 **Phase 3:**
 
 - Explicit information commodity: agents can offer location data as a tradeable good in exchange for resources rather than sharing it freely
-- Road formation: frequently-travelled paths become persistent terrain features that reduce movement cost
+- Route optimization: caching/route reuse to reduce pathfinding CPU at large populations
 - `respectProperty` implementation: theft as an actionable idea gated behind low moral score, with detection and social ostracism consequences
 
 **Phase 4:**
