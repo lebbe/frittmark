@@ -75,6 +75,7 @@ The current config covers these groups:
 - Movement and routes:
   - weighted terrain costs (`MOVE_COST_*`)
   - route multipliers (`MOVE_MULT_DIRT_PATH`, `MOVE_MULT_STONE_ROAD`)
+  - building-cell traversal/occupancy (shelter/house cells are walkable and can be occupied)
   - wear and decay thresholds (`TRAIL_*`)
   - inactivity and traversal degradation (`PATH_UNUSED_TO_REMOVE_TICKS`, `ROAD_UNUSED_TO_PATH_TICKS`, `ROAD_TRAVERSE_TO_PATH_THRESHOLD`)
   - pathfinder budget (`PATH_MAX_SEARCH_NODES`)
@@ -130,6 +131,8 @@ The world is a flat 100×100 grid stored as a single array of cell objects, inde
 }
 ```
 
+Movement invariant: a cell with a shelter or house remains traversable and occupiable by agents. Buildings suppress resource regeneration on that tile, but they do not block pathfinding or stepping.
+
 ### Resource Landscape Generation
 
 Resources are placed procedurally at construction time using overlapping radial gradients with Manhattan distance (not Euclidean) for a more angular, interesting shape:
@@ -148,7 +151,7 @@ Each tick, resources regenerate fractionally up to their cell capacity. Cells oc
 
 This is the central spatial query function used by harvesting and navigation. It operates in two phases:
 
-**Phase 1 — Vision scan:** All cells within a square of radius `vision` around `(ax, ay)` are checked. Building cells are skipped. Score is based on:
+**Phase 1 — Vision scan:** All cells within a square of radius `vision` around `(ax, ay)` are checked. Building cells are skipped for resource targeting. Score is based on:
 
 - effective yield capped by remaining carry capacity
 - distance from agent

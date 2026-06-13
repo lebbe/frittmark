@@ -302,7 +302,6 @@ export class World {
   move(agent: Agent, x: number, y: number, opts: MoveOptions = {}): void {
     if (!this.inBounds(x, y)) return
     const targetCell = this.cell(x, y)
-    if (targetCell.building) return
 
     const dx = Math.sign(x - agent.x)
     const dy = Math.sign(y - agent.y)
@@ -335,7 +334,7 @@ export class World {
     const ny = agent.y + dy
     if (!this.inBounds(nx, ny)) return
     const nextCell = this.cell(nx, ny)
-    if (getRouteType(nextCell) !== 'stone_road' || nextCell.building) return
+    if (getRouteType(nextCell) !== 'stone_road') return
     agent.x = nx
     agent.y = ny
     applyTrailWearOnStep(nextCell, wearDelta)

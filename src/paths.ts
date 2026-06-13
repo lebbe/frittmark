@@ -72,8 +72,8 @@ export function setRouteType(cell: PathCellLike, routeType: RouteType): void {
 }
 
 export function traversalCost(cell: PathCellLike): number {
-  if (cell.building) return Number.POSITIVE_INFINITY
-  let cost = dominantTerrainCost(cell)
+  // Buildings occupy a structure footprint but do not fully block traversal.
+  let cost = cell.building ? CFG.MOVE_COST_EMPTY : dominantTerrainCost(cell)
   const routeType = getRouteType(cell)
   if (routeType === 'dirt_path') {
     cost *= CFG.MOVE_MULT_DIRT_PATH
@@ -147,7 +147,6 @@ export function findPath(
 ): Point[] | null {
   if (!world.inBounds(fromX, fromY) || !world.inBounds(toX, toY)) return null
   if (fromX === toX && fromY === toY) return [{ x: fromX, y: fromY }]
-  if (world.cell(toX, toY).building) return null
 
   const open = new Set<string>([key(fromX, fromY)])
   const cameFrom = new Map<string, string>()
@@ -191,7 +190,6 @@ export function findPath(
       const ny = here.y + n.dy
       if (!world.inBounds(nx, ny)) continue
       const neighborCell = world.cell(nx, ny)
-      if (neighborCell.building) continue
 
       const neighborKey = key(nx, ny)
       const travel = traversalCost(neighborCell) * n.dist
